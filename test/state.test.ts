@@ -26,7 +26,7 @@ describe("état de la scène", () => {
     const state = parseState({
       v: 1,
       weather: [
-        { id: "a", kind: "rain", zone: "z1", enabled: false, direction: 720, wind: -3, intensity: 2, scale: 10, color: "#FF0000", opacity: 0.4 },
+        { id: "a", kind: "rain", zone: "z1", enabled: false, direction: 720, speed: 9, intensity: 2, scale: 10, color: "#FF0000", opacity: 0.4 },
         { id: "b", kind: "laser" },
       ],
       looks: [
@@ -34,7 +34,10 @@ describe("état de la scène", () => {
       ],
     });
     expect(state.weather).toEqual([
-      { id: "a", kind: "rain", zone: "z1", enabled: false, direction: 359, wind: 0, intensity: 1, scale: 4, color: "#ff0000", opacity: 0.4 },
+      {
+        id: "a", kind: "rain", zone: "z1", enabled: false, direction: 359, speed: 3, intensity: 1, scale: 4, color: "#ff0000", opacity: 0.4,
+        turbulence: 0.15, gusts: 0.25, variety: 0.3, patches: 0.2, options: { splashes: 0, lightning: 0, veil: 0 },
+      },
     ]);
     // L'ambiance de la scène est toujours là, en premier.
     expect(state.looks.map((look) => look.zone)).toEqual([SCENE_ZONE, "z1"]);
@@ -86,5 +89,19 @@ describe("état de la scène", () => {
 describe("traductions", () => {
   it("ont les mêmes textes en français et en anglais", () => {
     expect(Object.keys(DICTIONARIES.en).sort()).toEqual(Object.keys(DICTIONARIES.fr).sort());
+  });
+});
+
+describe("options des météos", () => {
+  it("ne garde que les options du type, bornées", () => {
+    const state = parseState({
+      v: 1,
+      weather: [
+        { id: "a", kind: "embers", options: { crackle: 2, glow: 0.3, splashes: 1 } },
+        { id: "b", kind: "sunrays" },
+      ],
+    });
+    expect(state.weather[0].options).toEqual({ crackle: 1, glow: 0.3 });
+    expect(state.weather[1].options).toEqual({ motes: 0.4 });
   });
 });

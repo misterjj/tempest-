@@ -13,8 +13,34 @@ export const MAX_STATE_BYTES = 256 * 1024;
 /** Plus haute limite d'effets par zone réglable (voir limits.ts, qui ne peut pas être importé ici). */
 export const HARD_EFFECTS_PER_ZONE = 12;
 
-export const WEATHER_KINDS = ["rain", "snow", "fog", "sand", "embers"] as const;
+export const WEATHER_KINDS = ["rain", "snow", "hail", "fog", "sand", "wind", "embers", "leaves", "fireflies", "clouds", "sunrays", "heat"] as const;
 export type WeatherKind = (typeof WEATHER_KINDS)[number];
+
+/** Options propres à certaines météos (0 à 1), en plus des réglages communs. */
+export const OPTION_KEYS = ["splashes", "lightning", "veil", "nearFlakes", "wisps", "whirls", "crackle", "glow", "motes", "debris"] as const;
+export type OptionKey = (typeof OPTION_KEYS)[number];
+
+/** Options de chaque météo, dans l'ordre du panneau, avec leur valeur de départ. */
+export const KIND_OPTIONS: Record<WeatherKind, Partial<Record<OptionKey, number>>> = {
+  rain: { splashes: 0, lightning: 0, veil: 0 },
+  snow: { nearFlakes: 0 },
+  hail: { lightning: 0 },
+  fog: { wisps: 0 },
+  sand: { whirls: 0 },
+  embers: { crackle: 0, glow: 0 },
+  leaves: {},
+  fireflies: { glow: 0.5 },
+  clouds: {},
+  sunrays: { motes: 0.4 },
+  wind: { debris: 0 },
+  heat: {},
+};
+
+/** Options de cette météo, dans l'ordre du panneau. */
+export const optionsOf = (kind: WeatherKind) => Object.keys(KIND_OPTIONS[kind]) as OptionKey[];
+
+/** Réglages communs sans objet pour certaines météos : la brume de chaleur déforme sans colorer. */
+export const HIDDEN_FIELDS: Partial<Record<WeatherKind, "color"[]>> = { heat: ["color"] };
 
 /** Zone de toute la scène ; les autres zones sont peintes par le MJ (voir zones.ts). */
 export const SCENE_ZONE = "scene";
@@ -26,10 +52,10 @@ export interface WeatherEffect {
   zone: string;
   /** L'œil de la carte d'effet : masqué sans être supprimé */
   enabled: boolean;
-  /** Degrés, 0 à 359 ; 180 = vers le bas de l'écran */
+  /** Sens du déplacement, en degrés : 0 = vers le haut de l'écran, 180 = vers le bas */
   direction: number;
-  /** 0 à 10 */
-  wind: number;
+  /** Multiplicateur de la vitesse naturelle de l'effet, 0,25 à 3 */
+  speed: number;
   /** 0 à 1 */
   intensity: number;
   /** 0,25 à 4, rapporté à la taille d'une case */
@@ -38,6 +64,16 @@ export interface WeatherEffect {
   color: string | null;
   /** 0 à 1 */
   opacity: number;
+  /** Écarts aléatoires de trajectoire, 0 à 1 */
+  turbulence: number;
+  /** Vagues de vitesse et de densité, 0 à 1 */
+  gusts: number;
+  /** Tailles différentes d'une particule à l'autre, 0 à 1 */
+  variety: number;
+  /** Nappes plus denses qui avancent avec l'effet, 0 à 1 */
+  patches: number;
+  /** Options propres à la météo (voir KIND_OPTIONS) : seules celles de son type sont gardées. */
+  options: Partial<Record<OptionKey, number>>;
 }
 
 export const TIME_KEYS = ["dawn", "day", "dusk", "night"] as const;
@@ -51,7 +87,7 @@ export interface TimeOfDay {
   colors: Record<TimeKey, string>;
 }
 
-export const FILTER_KINDS = ["grayscale", "sepia", "vignette", "grain", "brightness", "contrast", "saturation", "hue"] as const;
+export const FILTER_KINDS = ["blur", "grayscale", "sepia", "vignette", "grain", "brightness", "contrast", "saturation", "hue"] as const;
 export type FilterKind = (typeof FILTER_KINDS)[number];
 
 export interface Filter {
@@ -88,8 +124,57 @@ export const DEFAULT_TIME_COLORS: Record<TimeKey, string> = {
   night: "#3c4f8f",
 };
 
+/** Sens de départ de chaque météo : la pluie et la neige tombent, la brume et le sable filent, les braises montent. */
+const DEFAULT_DIRECTION: Record<WeatherKind, number> = {
+  rain: 180,
+  snow: 180,
+  hail: 180,
+  fog: 90,
+  sand: 90,
+  embers: 0,
+  leaves: 160,
+  fireflies: 0,
+  clouds: 90,
+  sunrays: 150,
+  wind: 90,
+  heat: 0,
+};
+
+/**
+ * Variations naturelles de départ de chaque météo : la neige et les feuilles flottent et varient
+ * beaucoup, la pluie et la grêle tombent droit, les rayons et les nuages restent calmes.
+ */
+const DEFAULT_VARIATIONS: Record<WeatherKind, Pick<WeatherEffect, "turbulence" | "gusts" | "variety" | "patches">> = {
+  rain: { turbulence: 0.15, gusts: 0.25, variety: 0.3, patches: 0.2 },
+  snow: { turbulence: 0.45, gusts: 0.2, variety: 0.6, patches: 0.25 },
+  hail: { turbulence: 0.1, gusts: 0.2, variety: 0.5, patches: 0.15 },
+  fog: { turbulence: 0.3, gusts: 0.1, variety: 0.5, patches: 0.35 },
+  sand: { turbulence: 0.35, gusts: 0.5, variety: 0.5, patches: 0.3 },
+  wind: { turbulence: 0.3, gusts: 0.5, variety: 0.4, patches: 0.3 },
+  embers: { turbulence: 0.5, gusts: 0.15, variety: 0.6, patches: 0.3 },
+  leaves: { turbulence: 0.5, gusts: 0.35, variety: 0.7, patches: 0.2 },
+  fireflies: { turbulence: 0.5, gusts: 0, variety: 0.5, patches: 0.4 },
+  clouds: { turbulence: 0.2, gusts: 0, variety: 0.5, patches: 0 },
+  sunrays: { turbulence: 0, gusts: 0.3, variety: 0.3, patches: 0 },
+  heat: { turbulence: 0.2, gusts: 0.2, variety: 0, patches: 0.3 },
+};
+
 export function defaultEffect(kind: WeatherKind, zone: string = SCENE_ZONE, id: string = crypto.randomUUID()): WeatherEffect {
-  return { id, kind, zone, enabled: true, direction: 180, wind: 3, intensity: 0.5, scale: 1, color: null, opacity: 1 };
+  return {
+    id,
+    kind,
+    zone,
+    enabled: true,
+    direction: DEFAULT_DIRECTION[kind],
+    speed: 1,
+    intensity: 0.5,
+    scale: 1,
+    color: null,
+    opacity: 1,
+    // Un peu d'irrégularité par défaut, selon la météo : un effet trop régulier paraît artificiel.
+    ...DEFAULT_VARIATIONS[kind],
+    options: { ...KIND_OPTIONS[kind] },
+  };
 }
 
 export function defaultLook(zone: string = SCENE_ZONE): Look {
@@ -125,11 +210,18 @@ function parseEffect(value: unknown): WeatherEffect | null {
     ...base,
     enabled: value.enabled !== false,
     direction: Math.round(clamp(value.direction, 0, 359, base.direction)),
-    wind: clamp(value.wind, 0, 10, base.wind),
+    speed: clamp(value.speed, 0.25, 3, base.speed),
     intensity: clamp(value.intensity, 0, 1, base.intensity),
     scale: clamp(value.scale, 0.25, 4, base.scale),
     color: isColor(value.color) ? value.color.toLowerCase() : null,
     opacity: clamp(value.opacity, 0, 1, base.opacity),
+    turbulence: clamp(value.turbulence, 0, 1, base.turbulence),
+    gusts: clamp(value.gusts, 0, 1, base.gusts),
+    variety: clamp(value.variety, 0, 1, base.variety),
+    patches: clamp(value.patches, 0, 1, base.patches),
+    options: Object.fromEntries(
+      optionsOf(base.kind).map((key) => [key, clamp(isObject(value.options) ? value.options[key] : undefined, 0, 1, base.options[key]!)]),
+    ),
   };
 }
 

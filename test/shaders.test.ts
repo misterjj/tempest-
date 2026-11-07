@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { maskSksl, type Stroke } from "../src/render/mask";
-import { gradeSksl, maskOverlaySksl, rainSksl } from "../src/render/shaders";
+import { maskFunction, maskSksl, type Stroke } from "../src/render/mask";
+import { gradeSksl, maskOverlaySksl, weatherSksl } from "../src/render/shaders";
+import { FILTER_KINDS, WEATHER_KINDS } from "../src/state";
 
 /** Uniforms fournis par Owlbear, avec leur type : les redéclarer autrement casse le shader. */
 const BUILT_IN: Record<string, string> = {
@@ -22,10 +23,10 @@ const zone: Stroke[] = [
 ];
 
 describe("shaders", () => {
-  const shaders = {
-    rain: rainSksl(maskSksl(zone, 70)),
-    grade: gradeSksl(maskSksl(null, 70)),
-    overlay: maskOverlaySksl(maskSksl(zone, 70)),
+  const shaders: Record<string, string> = {
+    ...Object.fromEntries(WEATHER_KINDS.map((kind) => [kind, weatherSksl(kind, maskFunction("mask", zone, 70))])),
+    grade: gradeSksl(maskFunction("mask", null, 70), true, [...FILTER_KINDS]),
+    overlay: maskOverlaySksl(maskFunction("mask", zone, 70)),
   };
 
   it.each(Object.entries(shaders))("%s ne redéclare aucun uniform d'Owlbear sous un autre type", (_, sksl) => {
@@ -34,15 +35,32 @@ describe("shaders", () => {
     }
   });
 
+  /**
+   * Mots réservés de GLSL ES. La version de Skia d'Owlbear les transmet tels quels à la carte
+   * graphique, qui refuse alors le shader (« patch » a cassé toute la météo une fois).
+   */
+  const RESERVED = new Set(
+    ("attribute varying coherent volatile restrict readonly writeonly resource atomic_uint noperspective patch sample " +
+      "subroutine common partition active asm class union enum typedef template this goto inline noinline public static " +
+      "extern external interface long short double fixed unsigned superp input output filter image sizeof cast namespace " +
+      "using centroid flat smooth layout precise buffer shared invariant lowp mediump highp precision texture sampler").split(" "),
+  );
+
+  it.each(Object.entries(shaders))("%s n'utilise aucun mot réservé de GLSL comme nom", (_, sksl) => {
+    const names = [...sksl.matchAll(/\b(?:float|int|bool|vec[234]|half[234]?|mat[234])\s+([A-Za-z_]\w*)/g)].map((match) => match[1]);
+    expect(names.filter((name) => RESERVED.has(name))).toEqual([]);
+  });
+
   it("lit la scène en coordonnées écran", () => {
-    expect(shaders.grade).toContain("scene.eval((vec3(coord, 1.0) * view).xy)");
+    expect(shaders.grade).toContain("vec2 screen = (vec3(coord, 1.0) * view).xy;");
+    expect(shaders.grade).toContain("scene.eval(screen)");
   });
 
   it("écrit les formes du masque dans le shader, gomme comprise", () => {
     const mask = maskSksl(zone, 70);
-    expect(mask).toContain("m = max(m, cover(length(p - vec2(0.0, 0.0)) - 50.0));");
-    expect(mask).toContain("m = min(m, 1.0 - cover(length(p - vec2(0.0, 0.0)) - 10.0));");
-    expect(maskSksl(null, 70)).toBe("float mask(vec2 p) { return 1.0; }");
+    expect(mask).toContain("m = max(m, mask_cover(length(p - vec2(0.0, 0.0)) - 50.0));");
+    expect(mask).toContain("m = min(m, 1.0 - mask_cover(length(p - vec2(0.0, 0.0)) - 10.0));");
+    expect(maskSksl(null, 70)).toContain("float mask(vec2 p) { return 1.0; }");
   });
 });
 
@@ -53,5 +71,13 @@ describe("simplification d'un coup de pinceau", () => {
     expect(simplifyStroke(wobbly, 2)).toEqual([wobbly[0], wobbly[99]]);
     const corner = [...Array.from({ length: 50 }, (_, i) => ({ x: i * 4, y: 0 })), ...Array.from({ length: 50 }, (_, i) => ({ x: 196, y: (i + 1) * 4 }))];
     expect(simplifyStroke(corner, 2)).toEqual([corner[0], corner[49], corner[99]]);
+  });
+});
+
+describe("filtre flou", () => {
+  it("ne relit la scène autour du point que s'il est activé", () => {
+    const mask = maskFunction("mask", null, 0);
+    expect(gradeSksl(mask, false, ["sepia"])).not.toContain("f_blur");
+    expect(gradeSksl(mask, false, ["blur", "sepia"])).toContain("sum += scene.eval");
   });
 });
