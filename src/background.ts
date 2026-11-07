@@ -4,12 +4,15 @@ import OBR from "@owlbear-rodeo/sdk";
 import { t } from "./i18n";
 import { startRenderer } from "./render";
 import { PLUGIN_ID } from "./state";
+import { setupTool } from "./tool/tool";
 
 export const PANEL_CHANNEL = `${PLUGIN_ID}/panel`;
 /** Message au panneau : ouvrir l'onglet Météo avec cette cible. */
 export type PanelMessage = { type: "target"; itemId: string };
 
 OBR.onReady(async () => {
+  // L'outil se crée pour tous, mais ses icônes ne s'affichent que pour le MJ.
+  setupTool();
   await startRenderer();
   OBR.contextMenu.create({
     id: `${PLUGIN_ID}/ajouter-meteo`,

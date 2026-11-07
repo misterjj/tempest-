@@ -1,0 +1,59 @@
+/* Palette de l'outil « Zones météo ». Couleurs de base : voir panel.css. */
+body { overflow: hidden; }
+#app { height: auto; }
+.palette-bar { gap: 6px; padding: 8px 8px 8px 6px; cursor: grab; touch-action: none; user-select: none; }
+body.dragging, body.dragging * { cursor: grabbing !important; user-select: none; }
+.palette-bar strong { flex: 1; font-size: 14px; }
+.grip { display: grid; color: var(--muted); }
+.palette { display: flex; flex-direction: column; gap: 0; padding: 0; }
+.block { display: flex; flex-direction: column; gap: 10px; padding: 12px; border-bottom: 1px solid var(--line); }
+.block-head { display: flex; align-items: center; justify-content: space-between; }
+.block-head h3 { margin: 0; font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+
+/* Peindre / Effacer : deux gros boutons, Effacer en rouge quand il est actif. */
+.segmented.mode { padding: 3px; }
+.segmented.mode button { display: flex; align-items: center; justify-content: center; gap: 6px; padding: 7px 4px; font-size: 13px; }
+.segmented.mode button.erase[aria-pressed="true"] { background: rgb(214 69 69 / 0.28); color: #ffb3b3; }
+
+.field { display: flex; flex-direction: column; gap: 5px; color: var(--muted); font-size: 12px; }
+.field-row { display: flex; justify-content: space-between; }
+.value { color: var(--text); font-variant-numeric: tabular-nums; }
+.field input:not([type="range"]) {
+  padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--text); font: inherit;
+}
+.field input:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.field input[type="range"] { width: 100%; accent-color: var(--accent); }
+.tip { margin: 0; color: var(--muted); font-size: 11.5px; line-height: 1.45; }
+.keys { padding: 10px 12px 12px; }
+
+/* Zones : une ligne par zone, la zone choisie se déplie. */
+.zone-list { display: flex; flex-direction: column; gap: 4px; }
+.zone { border-radius: 8px; background: var(--surface); border: 1px solid transparent; }
+.zone.open { border-color: var(--zone); background: var(--surface-hover); }
+.zone-pick {
+  display: flex; align-items: center; gap: 8px; width: 100%; padding: 7px 9px; border: 0; background: none;
+  color: var(--text); text-align: left; cursor: pointer; border-radius: 8px;
+}
+.zone-pick:hover { background: var(--surface-hover); }
+.zone-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.zone.open .zone-name { font-weight: 600; }
+.zone-count { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.dot { flex: none; width: 12px; height: 12px; border-radius: 50%; box-shadow: 0 0 0 2px rgb(0 0 0 / 0.25); }
+.zone-body { display: flex; flex-direction: column; gap: 10px; padding: 2px 10px 10px; }
+.meter { height: 6px; border-radius: 3px; background: rgb(0 0 0 / 0.25); overflow: hidden; }
+.meter span { display: block; height: 100%; background: var(--zone, var(--accent)); }
+.meter.full span { background: #ff8a5c; }
+.meter-text { margin: -6px 0 0; color: var(--muted); font-size: 11px; }
+.zone-actions { display: flex; align-items: center; gap: 4px; }
+.spacer { flex: 1; }
+
+.icon-button, .text-button {
+  display: inline-flex; align-items: center; justify-content: center; gap: 5px; border: 0; border-radius: 6px;
+  background: none; color: var(--muted); cursor: pointer; font-size: 12px;
+}
+.icon-button { width: 28px; height: 28px; }
+.text-button { padding: 5px 8px; }
+.icon-button:hover:not(:disabled), .text-button:hover:not(:disabled) { background: var(--surface-hover); color: var(--text); }
+.icon-button:disabled, .text-button:disabled { opacity: 0.4; cursor: default; }
+.text-button.danger { color: #ff8a8a; }
+.text-button.danger.confirm { background: rgb(214 69 69 / 0.85); color: #fff; }

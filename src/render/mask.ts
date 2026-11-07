@@ -7,16 +7,20 @@ export type Stroke =
   | { k: "circle"; x: number; y: number; r: number; erase?: boolean }
   | { k: "rect"; x: number; y: number; w: number; h: number; erase?: boolean }
   /** Segment de pinceau : un trait est une suite de segments. */
-  | { k: "line"; x1: number; y1: number; x2: number; y2: number; r: number; erase?: boolean };
+  | { k: "line"; x1: number; y1: number; x2: number; y2: number; r: number; erase?: boolean }
+  /** Polygone fermé : points à plat [x0, y0, x1, y1, …] */
+  | { k: "poly"; p: number[]; erase?: boolean };
 
 const f = (value: number) => {
   const text = (Math.round(value * 10) / 10).toString();
   return text.includes(".") ? text : `${text}.0`;
 };
 
-/** Distance signée à la forme : négative dedans. */
-function distance(stroke: Stroke) {
+/** Distance signée à la forme : négative dedans. `index` nomme la fonction d'un polygone. */
+function distance(stroke: Stroke, index: number) {
   switch (stroke.k) {
+    case "poly":
+      return `poly${index}(p)`;
     case "circle":
       return `length(p - vec2(${f(stroke.x)}, ${f(stroke.y)})) - ${f(stroke.r)}`;
     case "rect":
@@ -34,12 +38,49 @@ function bounds(stroke: Stroke) {
       return [Math.min(stroke.x, stroke.x + stroke.w), Math.min(stroke.y, stroke.y + stroke.h), Math.max(stroke.x, stroke.x + stroke.w), Math.max(stroke.y, stroke.y + stroke.h)];
     case "line":
       return [Math.min(stroke.x1, stroke.x2) - stroke.r, Math.min(stroke.y1, stroke.y2) - stroke.r, Math.max(stroke.x1, stroke.x2) + stroke.r, Math.max(stroke.y1, stroke.y2) + stroke.r];
+    case "poly": {
+      const xs = stroke.p.filter((_, i) => i % 2 === 0);
+      const ys = stroke.p.filter((_, i) => i % 2 === 1);
+      return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
+    }
   }
 }
 
+/**
+ * Distance signée à un polygone (méthode d'Inigo Quilez), déroulée arête par arête : SkSL
+ * n'accepte pas de tableau de points, chaque polygone a donc sa propre fonction.
+ */
+function polygonFunction(points: number[], index: number) {
+  const vertices: [number, number][] = [];
+  for (let i = 0; i < points.length; i += 2) vertices.push([points[i], points[i + 1]]);
+  const v = (i: number) => `vec2(${f(vertices[i][0])}, ${f(vertices[i][1])})`;
+  const edges = vertices
+    .map((_, i) => {
+      const j = (i + vertices.length - 1) % vertices.length;
+      return `  e = ${v(j)} - ${v(i)};
+  w = p - ${v(i)};
+  b = w - e * clamp(dot(w, e) / max(dot(e, e), 0.0001), 0.0, 1.0);
+  d = min(d, dot(b, b));
+  c1 = p.y >= ${f(vertices[i][1])};
+  c2 = p.y < ${f(vertices[j][1])};
+  c3 = e.x * w.y > e.y * w.x;
+  if ((c1 && c2 && c3) || (!c1 && !c2 && !c3)) s = -s;`;
+    })
+    .join("\n");
+  return `float poly${index}(vec2 p) {
+  vec2 e; vec2 w; vec2 b; bool c1; bool c2; bool c3;
+  float d = dot(p - ${v(0)}, p - ${v(0)});
+  float s = 1.0;
+${edges}
+  return s * sqrt(d);
+}`;
+}
+
 /** Ligne SkSL d'une forme : la peinture ajoute, la gomme retire. */
-const line = (stroke: Stroke) =>
-  stroke.erase ? `m = min(m, 1.0 - cover(${distance(stroke)}));` : `m = max(m, cover(${distance(stroke)}));`;
+const line = (stroke: Stroke, index: number) =>
+  stroke.erase
+    ? `m = min(m, 1.0 - cover(${distance(stroke, index)}));`
+    : `m = max(m, cover(${distance(stroke, index)}));`;
 
 /**
  * Fonction SkSL `float mask(vec2 p)` : 1 dans la zone peinte, 0 dehors, avec un fondu de
@@ -70,13 +111,14 @@ float capsule(vec2 p, vec2 a, vec2 b, float r) {
   float h = clamp(dot(pa, ba) / max(dot(ba, ba), 0.0001), 0.0, 1.0);
   return length(pa - ba * h) - r;
 }
+${strokes.map((stroke, index) => (stroke.k === "poly" ? polygonFunction(stroke.p, index) : "")).filter(Boolean).join("\n")}
 float cover(float d) {
   return clamp(0.5 - d / ${f(margin)}, 0.0, 1.0);
 }
 float mask(vec2 p) {
   if (p.x < ${f(box[0] - margin)} || p.y < ${f(box[1] - margin)} || p.x > ${f(box[2] + margin)} || p.y > ${f(box[3] + margin)}) return 0.0;
   float m = 0.0;
-${strokes.map((stroke) => `  ${line(stroke)}`).join("\n")}
+${strokes.map((stroke, index) => `  ${line(stroke, index)}`).join("\n")}
   return m;
 }`;
 }

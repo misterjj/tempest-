@@ -86,11 +86,15 @@ half4 main(float2 coord) {
   return half4(mix(c.rgb, graded * c.a, m), c.a);
 }`;
 
-/** Masque vu par le MJ pendant qu'il peint : la zone teintée, le reste intact. */
+/**
+ * Masque vu par le MJ pendant qu'il peint : la zone teintée, le reste intact.
+ * `strength` : plus fort pour la zone en cours d'édition.
+ */
 export const maskOverlaySksl = (mask: string) => `
 uniform vec3 tint;
+uniform float strength;
 ${mask}
 half4 main(float2 coord) {
-  float m = mask(coord) * 0.35;
+  float m = mask(coord) * strength;
   return half4(half3(tint) * m, m);
 }`;

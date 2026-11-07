@@ -108,7 +108,7 @@ export async function syncProto(proto: Proto, isGM: boolean, quality: Quality, e
     );
   }
   if (isGM && proto.showMask) {
-    wanted.push(effect(ID.mask, maskOverlaySksl(maskSksl(zone, feather)), "CONTROL", [{ name: "tint", value: { x: 0.3, y: 0.6, z: 1 } }]));
+    wanted.push(effect(ID.mask, maskOverlaySksl(maskSksl(zone, feather)), "CONTROL", [{ name: "tint", value: { x: 0.3, y: 0.6, z: 1 } }, { name: "strength", value: 0.35 }]));
   }
 
   // Un effet dont le shader change est retiré puis reposé ; les autres restent en place.

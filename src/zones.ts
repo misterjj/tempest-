@@ -26,7 +26,9 @@ export const ZONE_COLORS = ["#4f9dff", "#ff8a3d", "#3ddc97", "#d36bff", "#ffd23d
 export type Shape =
   | { t: "b"; r: number; p: number[]; e?: 1 }
   | { t: "r"; x: number; y: number; w: number; h: number; e?: 1 }
-  | { t: "c"; x: number; y: number; r: number; e?: 1 };
+  | { t: "c"; x: number; y: number; r: number; e?: 1 }
+  /** Polygone fermé : au moins 3 points à plat [x0, y0, x1, y1, …] */
+  | { t: "g"; p: number[]; e?: 1 };
 
 export interface Zone {
   id: string;
@@ -44,8 +46,12 @@ export interface ZonesData {
 
 export const emptyZones = (): ZonesData => ({ v: ZONES_VERSION, zones: [] });
 
-/** Segments de rendu d'une forme : un pinceau de n points en compte n - 1, un seul point en compte 1. */
-export const shapeCost = (shape: Shape) => (shape.t === "b" ? Math.max(1, shape.p.length / 2 - 1) : 1);
+/**
+ * Segments de rendu d'une forme : un pinceau de n points en compte n - 1 (un seul point : 1),
+ * un polygone de n points en compte n (une arête par côté).
+ */
+export const shapeCost = (shape: Shape) =>
+  shape.t === "b" ? Math.max(1, shape.p.length / 2 - 1) : shape.t === "g" ? shape.p.length / 2 : 1;
 export const zoneCost = (zone: Zone) => zone.shapes.reduce((total, shape) => total + shapeCost(shape), 0);
 
 /** Formes prêtes pour le shader. */
@@ -55,6 +61,7 @@ export function zoneStrokes(zone: Zone): Stroke[] {
     const erase = shape.e === 1 ? { erase: true } : {};
     if (shape.t === "r") strokes.push({ k: "rect", x: shape.x, y: shape.y, w: shape.w, h: shape.h, ...erase });
     else if (shape.t === "c") strokes.push({ k: "circle", x: shape.x, y: shape.y, r: shape.r, ...erase });
+    else if (shape.t === "g") strokes.push({ k: "poly", p: shape.p, ...erase });
     else if (shape.p.length <= 2) strokes.push({ k: "circle", x: shape.p[0], y: shape.p[1], r: shape.r, ...erase });
     else {
       for (let i = 2; i < shape.p.length; i += 2) {
@@ -115,6 +122,9 @@ function parseShape(value: unknown): Shape | null {
   }
   if (value.t === "r" && [value.x, value.y, value.w, value.h].every(isNumber)) {
     return { t: "r", x: value.x as number, y: value.y as number, w: value.w as number, h: value.h as number, ...erase };
+  }
+  if (value.t === "g" && Array.isArray(value.p) && value.p.length >= 6 && value.p.length % 2 === 0 && value.p.every(isNumber)) {
+    return { t: "g", p: value.p as number[], ...erase };
   }
   if (value.t === "c" && [value.x, value.y, value.r].every(isNumber) && (value.r as number) > 0) {
     return { t: "c", x: value.x as number, y: value.y as number, r: value.r as number, ...erase };

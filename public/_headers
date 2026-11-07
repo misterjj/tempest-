@@ -2,3 +2,5 @@
   Access-Control-Allow-Origin: *
 /icon.svg
   Access-Control-Allow-Origin: *
+/tool/*
+  Access-Control-Allow-Origin: *
