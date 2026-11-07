@@ -1,0 +1,22 @@
+{
+  "name": "tempest",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "test": "vitest run",
+    "deploy": "pnpm build && npx wrangler pages deploy dist --project-name tempest-owlbear",
+    "preview": "pnpm build && npx wrangler pages deploy dist --project-name tempest-owlbear --branch preview"
+  },
+  "dependencies": {
+    "@owlbear-rodeo/sdk": "^3.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.5",
+    "vitest": "^5.0.5"
+  }
+}

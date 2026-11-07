@@ -1,0 +1,17 @@
+{
+  "name": "Tempest!",
+  "version": "0.1.0",
+  "manifest_version": 1,
+  "author": "Jonathan Jorand",
+  "description": "Weather, light and mood for your scenes.",
+  "icon": "/icon.svg",
+  "action": {
+    "title": "Tempest!",
+    "icon": "/icon.svg",
+    "popover": "/panel.html",
+    "width": 400,
+    "height": 600
+  },
+  "background_url": "/background.html",
+  "homepage_url": "https://github.com/misterjj/tempest-"
+}
