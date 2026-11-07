@@ -1,7 +1,9 @@
 // Lecture et écriture de l'état dans les métadonnées de la scène.
 
 import OBR from "@owlbear-rodeo/sdk";
-import { MAX_STATE_BYTES, STATE_KEY, parseState, stateBytes, type TempestState } from "./state";
+import { MAX_STATE_BYTES, STATE_KEY, forgetZone, parseState, stateBytes, type TempestState } from "./state";
+import { limitsIn, settingsWith, type Limits } from "./limits";
+import { MAX_ZONES_BYTES, ZONES_KEY, parseZones, zonesBytes, type ZonesData } from "./zones";
 
 export async function readState(): Promise<TempestState> {
   const metadata = await OBR.scene.getMetadata();
@@ -21,4 +23,48 @@ export async function updateState(change: (state: TempestState) => void): Promis
 
 export function onStateChange(callback: (state: TempestState) => void) {
   return OBR.scene.onMetadataChange((metadata) => callback(parseState(metadata[STATE_KEY])));
+}
+
+// --- Zones peintes, sous leur propre clé ------------------------------------------------------
+
+export async function readZones(): Promise<ZonesData> {
+  return parseZones((await OBR.scene.getMetadata())[ZONES_KEY]);
+}
+
+export class ZonesTooLargeError extends Error {}
+
+/** Modifie les zones de la scène (MJ seulement). */
+export async function updateZones(change: (data: ZonesData) => void): Promise<ZonesData> {
+  const data = await readZones();
+  change(data);
+  if (zonesBytes(data) > MAX_ZONES_BYTES) throw new ZonesTooLargeError();
+  await OBR.scene.setMetadata({ [ZONES_KEY]: data });
+  return data;
+}
+
+export function onZonesChange(callback: (data: ZonesData) => void) {
+  return OBR.scene.onMetadataChange((metadata) => callback(parseZones(metadata[ZONES_KEY])));
+}
+
+/** Supprime une zone, et les effets et réglages qui la visaient. */
+export async function deleteZone(id: string) {
+  const [state, zones] = await Promise.all([readState(), readZones()]);
+  forgetZone(state, id);
+  zones.zones = zones.zones.filter((zone) => zone.id !== id);
+  await OBR.scene.setMetadata({ [STATE_KEY]: state, [ZONES_KEY]: zones });
+}
+
+// --- Réglages de la salle --------------------------------------------------------------------
+
+export async function readLimits(): Promise<Limits> {
+  return limitsIn(await OBR.room.getMetadata());
+}
+
+/** Change les limites de la salle (MJ seulement). */
+export async function writeLimits(limits: Limits) {
+  await OBR.room.setMetadata(settingsWith(await OBR.room.getMetadata(), { limits }));
+}
+
+export function onLimitsChange(callback: (limits: Limits) => void) {
+  return OBR.room.onMetadataChange((metadata) => callback(limitsIn(metadata)));
 }

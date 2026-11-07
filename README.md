@@ -18,7 +18,10 @@ Add the custom extension `http://localhost:5175/manifest.json` in Owlbear Rodeo,
 
 ### Architecture
 
-- `src/state.ts`: the only shared data, one object in the scene metadata (`com.tempest/state`), written by the GM.
+- `src/state.ts`: the shared settings, one object in the scene metadata (`com.tempest/state`), written by the GM:
+  weather effects (each on a zone), and time of day and filters per zone. Kept under 4 KB.
+- `src/zones.ts`: the zones painted by the GM (brush, rectangle, circle, eraser), under their own key
+  (`com.tempest/zones`), written only while painting. Up to 8 zones of 150 shapes, about 20 KB at most.
 - `src/render/`: each client reads that state and draws its own local GPU effects (weather, then time of day and
   filters as post-processing). Only the state goes over the network.
 - `src/local.ts`: per-browser settings (quality, mute).
