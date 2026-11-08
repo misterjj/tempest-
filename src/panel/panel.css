@@ -117,3 +117,53 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
 .variations summary:hover { color: var(--text); }
 .variations[open] summary .chevron { transform: rotate(90deg); }
 .variations-body { display: flex; flex-direction: column; gap: 10px; padding-top: 10px; }
+
+/* --- Ambiances ------------------------------------------------------------------------- */
+.tabs .tab-icon { flex: 0 0 38px; display: inline-grid; place-items: center; }
+.tabs .tab-icon .icon { width: 17px; height: 17px; }
+.hint.flush { margin: 0; }
+.section-label { margin: 6px 0 -4px; }
+.presets { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 8px; }
+.preset {
+  display: flex; flex-direction: column; gap: 5px; width: 100%; padding: 4px 4px 6px; border: 1px solid transparent;
+  border-radius: 8px; background: var(--surface); cursor: pointer; text-align: left;
+}
+.preset:hover { background: var(--surface-hover); border-color: var(--line); }
+.preset:hover .thumb { filter: brightness(1.08); }
+.thumb { position: relative; display: block; height: 58px; overflow: hidden; border-radius: 5px; }
+.thumb-sky, .thumb .veil { position: absolute; inset: 0; }
+/* Le flou déborde : le ciel est un peu plus grand que la vignette. */
+.thumb-sky { inset: -4px; }
+.thumb .rays {
+  background: repeating-linear-gradient(120deg, transparent 0 10px, color-mix(in srgb, var(--tint) 45%, transparent) 12px, transparent 14px 26px);
+  mix-blend-mode: screen;
+}
+.thumb-icons { position: absolute; left: 6px; bottom: 5px; display: flex; gap: 3px; color: #fff; filter: drop-shadow(0 1px 1px rgb(0 0 0 / 0.6)); }
+.thumb-icons .icon { width: 15px; height: 15px; }
+.preset-name { padding: 0 2px; font-size: 12px; font-weight: 600; line-height: 1.25; }
+.preset-wrap { position: relative; }
+.preset-delete {
+  position: absolute; top: 8px; right: 8px; display: none; place-items: center; min-width: 24px; height: 24px; padding: 0 6px;
+  border: 0; border-radius: 6px; background: rgb(0 0 0 / 0.55); color: #fff; cursor: pointer; font-size: 11px;
+}
+.preset-delete .icon { width: 14px; height: 14px; }
+.preset-wrap:hover .preset-delete, .preset-delete:focus-visible, .preset-delete.confirm { display: inline-grid; }
+.preset-delete:hover, .preset-delete.confirm { background: #c43c3c; }
+.undo-bar {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 6px 6px 10px;
+  border-radius: 8px; background: color-mix(in srgb, var(--accent) 16%, transparent); font-size: 12px;
+}
+.save-button { align-self: flex-start; }
+.save-form { display: flex; align-items: center; gap: 6px; }
+.save-form input {
+  flex: 1; min-width: 0; padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--text); font: inherit;
+}
+
+/* --- Réglages -------------------------------------------------------------------------- */
+.settings { display: flex; flex-direction: column; gap: 8px; }
+.limit { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.limit input {
+  width: 76px; padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--text); font: inherit; text-align: right;
+}
+.warning { margin: 0; padding: 6px 8px; border-radius: 6px; background: rgb(255 180 60 / 0.14); color: #ffcf7a; font-size: 12px; }
+:root[data-theme="light"] .warning { color: #8a5600; }

@@ -203,7 +203,7 @@ const isColor = (value: unknown): value is string => typeof value === "string" &
 
 const zoneId = (value: unknown) => (typeof value === "string" && value ? value.slice(0, 64) : SCENE_ZONE);
 
-function parseEffect(value: unknown): WeatherEffect | null {
+export function parseEffect(value: unknown): WeatherEffect | null {
   if (!isObject(value) || !WEATHER_KINDS.includes(value.kind as WeatherKind)) return null;
   const base = defaultEffect(value.kind as WeatherKind, zoneId(value.zone), typeof value.id === "string" ? value.id : undefined);
   return {
@@ -225,7 +225,7 @@ function parseEffect(value: unknown): WeatherEffect | null {
   };
 }
 
-function parseLook(value: unknown): Look | null {
+export function parseLook(value: unknown): Look | null {
   if (!isObject(value)) return null;
   const look = defaultLook(zoneId(value.zone));
   if (isObject(value.time)) {

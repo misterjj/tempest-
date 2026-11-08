@@ -4,10 +4,23 @@
 
 import OBR from "@owlbear-rodeo/sdk";
 import { currentLanguage, t } from "../i18n";
-import { DEFAULT_LIMITS, type Limits } from "../limits";
+import { DEFAULT_LIMITS, LIMIT_RANGES, parseLimit, raisedLimits, type Limits } from "../limits";
 import { QUALITIES, isMuted, qualitySetting, setMuted, setQuality, type Quality } from "../local";
 import { lightAt } from "../render/daylight";
-import { onLimitsChange, onStateChange, onZonesChange, readLimits, readState, readZones } from "../scene-state";
+import { onLimitsChange, onStateChange, onZonesChange, readLimits, readState, readZones, writeLimits } from "../scene-state";
+import {
+  BUILTIN_PRESETS,
+  MAX_CUSTOM_PRESETS,
+  applyPreset,
+  capturePreset,
+  lookIsActive,
+  parseCustomPresets,
+  restoreZone,
+  snapshotZone,
+  type Preset,
+  type ZoneSnapshot,
+} from "../presets";
+import { NATURAL_TINTS } from "../render/shaders";
 import {
   SCENE_ZONE,
   STATE_KEY,
@@ -31,13 +44,13 @@ import type { Zone } from "../zones";
 import { icon, weatherIcon } from "./icons";
 import "./panel.css";
 
-const TABS = ["presets", "weather", "time", "filters"] as const;
+const TABS = ["presets", "weather", "time", "filters", "settings"] as const;
 type Tab = (typeof TABS)[number];
 
 const app = document.querySelector<HTMLDivElement>("#app")!;
 const escape = (text: string) => text.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
 
-let tab: Tab = "weather";
+let tab: Tab = "presets";
 let state: TempestState;
 let zones: Zone[] = [];
 let limits: Limits = DEFAULT_LIMITS;
@@ -285,11 +298,186 @@ function drawGM() {
       <button type="button" class="stop" id="stop" aria-pressed="${state.paused}">${state.paused ? t("app.resume") : t("app.stopAll")}</button>
     </header>
     <nav class="tabs" role="tablist">
-      ${TABS.map((name) => `<button type="button" role="tab" data-tab="${name}" aria-selected="${name === tab}">${t(`tab.${name}`)}</button>`).join("")}
+      ${TABS.map((name) =>
+        name === "settings"
+          ? `<button type="button" role="tab" class="tab-icon" data-tab="${name}" aria-selected="${name === tab}" title="${t("tab.settings")}" aria-label="${t("tab.settings")}">${icon("sliders")}</button>`
+          : `<button type="button" role="tab" data-tab="${name}" aria-selected="${name === tab}">${t(`tab.${name}`)}</button>`,
+      ).join("")}
     </nav>
     <main class="content" role="tabpanel">
-      ${tab === "weather" ? weatherTab() : tab === "time" ? timeTab() : tab === "filters" ? filtersTab() : `<p class="soon">${t("tab.soon")}</p>`}
+      ${{ presets: presetsTab, weather: weatherTab, time: timeTab, filters: filtersTab, settings: settingsTab }[tab]()}
     </main>`;
+}
+
+// --- Ambiances ---------------------------------------------------------------------------------
+
+const CUSTOM_KEY = "tempest/presets";
+
+/** Ambiances du MJ, gardées dans son navigateur (navigation privée : rien n'est gardé). */
+function customPresets(): Preset[] {
+  try {
+    return parseCustomPresets(localStorage.getItem(CUSTOM_KEY));
+  } catch {
+    return [];
+  }
+}
+
+function storeCustomPresets(presets: Preset[]) {
+  try {
+    localStorage.setItem(CUSTOM_KEY, JSON.stringify(presets));
+    return true;
+  } catch {
+    OBR.notification.show(t("preset.storeError"), "ERROR");
+    return false;
+  }
+}
+
+/** Dernière ambiance appliquée, pour « Annuler ». */
+let lastApplied: { snapshot: ZoneSnapshot; name: string; skipped: number } | undefined;
+/** Formulaire « Enregistrer cette zone » ouvert. */
+let saving = false;
+/** Ambiance du MJ dont la suppression attend confirmation. */
+let confirmDelete: string | undefined;
+
+const presetName = (preset: Preset) => preset.name ?? t(`preset.${preset.id}` as Parameters<typeof t>[0]);
+const zoneName = (id: string) => (id === SCENE_ZONE ? t("zone.scene") : zones.find((zone) => zone.id === id)?.name || "—");
+
+const mix = (a: number[], b: number[], k: number) => a.map((value, i) => value + (b[i] - value) * k);
+const css = (c: number[]) => `rgb(${c.map((v) => Math.round(Math.min(1, Math.max(0, v)) * 255)).join(" ")})`;
+
+/** Vignette dessinée : un ciel sur une prairie, éclairé à l'heure de l'ambiance, avec ses filtres. */
+function thumb(preset: Preset) {
+  let top = [0.55, 0.75, 0.95];
+  let bottom = [0.4, 0.58, 0.32];
+  const { time, filters } = preset.look;
+  if (time.enabled) {
+    const light = lightAt(time.hour, time.colors);
+    const lit = (c: number[]) => {
+      const grey = c[0] * 0.299 + c[1] * 0.587 + c[2] * 0.114;
+      return mix([grey, grey, grey], c, light.sat).map((v, i) => v * [light.tint.x, light.tint.y, light.tint.z][i] * light.bright);
+    };
+    top = lit(top);
+    bottom = lit(bottom);
+  }
+  const on = (kind: string) => filters.find((filter) => filter.kind === kind && filter.enabled)?.amount;
+  const cssFilters = [
+    on("blur") !== undefined && `blur(${(on("blur")! * 2).toFixed(1)}px)`,
+    on("grayscale") !== undefined && `grayscale(${on("grayscale")})`,
+    on("sepia") !== undefined && `sepia(${on("sepia")})`,
+    on("brightness") !== undefined && `brightness(${on("brightness")! * 2})`,
+    on("contrast") !== undefined && `contrast(${on("contrast")! * 2})`,
+    on("saturation") !== undefined && `saturate(${on("saturation")! * 2})`,
+    on("hue") !== undefined && `hue-rotate(${Math.round((on("hue")! - 0.5) * 360)}deg)`,
+  ].filter(Boolean);
+  const vignette = on("vignette");
+  // La météo teinte la vignette : brume blanche, sable doré, ombres de nuages…
+  const veils = preset.weather
+    .filter((effect) => effect.enabled && !["heat", "embers", "fireflies", "leaves", "wind"].includes(effect.kind))
+    .map((effect) => {
+      const tint = effect.color ? effect.color : css([NATURAL_TINTS[effect.kind].x, NATURAL_TINTS[effect.kind].y, NATURAL_TINTS[effect.kind].z]);
+      if (effect.kind === "sunrays")
+        return `<span class="veil rays" style="--tint:${tint};opacity:${(0.35 + effect.intensity * 0.5).toFixed(2)}"></span>`;
+      return `<span class="veil" style="background:${tint};opacity:${(effect.intensity * effect.opacity * 0.4).toFixed(2)}"></span>`;
+    })
+    .join("");
+  const kinds = [...new Set(preset.weather.map((effect) => effect.kind))].slice(0, 4);
+  return `
+    <span class="thumb">
+      <span class="thumb-sky" style="background:linear-gradient(${css(top)}, ${css(bottom)});${cssFilters.length ? `filter:${cssFilters.join(" ")};` : ""}${
+        vignette ? `box-shadow:inset 0 0 ${Math.round(8 + vignette * 18)}px rgb(0 0 0 / ${(0.3 + vignette * 0.5).toFixed(2)});` : ""
+      }"></span>
+      ${veils}
+      <span class="thumb-icons">${kinds.map((kind) => weatherIcon(kind)).join("")}</span>
+    </span>`;
+}
+
+function presetCard(preset: Preset, custom: boolean) {
+  const button = `<button type="button" class="preset" data-${custom ? "custom" : "preset"}="${preset.id}">${thumb(preset)}<span class="preset-name">${escape(presetName(preset))}</span></button>`;
+  if (!custom) return button;
+  const confirming = confirmDelete === preset.id;
+  return `
+    <div class="preset-wrap">
+      ${button}
+      <button type="button" class="preset-delete ${confirming ? "confirm" : ""}" data-delete-preset="${preset.id}" title="${t("preset.delete")}">${
+        confirming ? t("preset.confirmDelete") : icon("trash")
+      }</button>
+    </div>`;
+}
+
+function presetsTab() {
+  const custom = customPresets();
+  const own = state.weather.some((effect) => effect.zone === zoneId) || lookIsActive(state.looks.find((look) => look.zone === zoneId) ?? state.looks[0]);
+  const defaultName = zoneId === SCENE_ZONE ? t("preset.defaultName") : zoneName(zoneId);
+  return `
+    ${zonePicker()}
+    ${
+      lastApplied && lastApplied.snapshot.zone === zoneId
+        ? `<div class="undo-bar"><span>${t("preset.applied", { name: escape(lastApplied.name) })}${
+            lastApplied.skipped ? ` ${t("preset.skipped", { count: lastApplied.skipped })}` : ""
+          }</span><button type="button" class="stop" id="undo-preset">${t("preset.undo")}</button></div>`
+        : `<p class="hint flush">${t("preset.help")}</p>`
+    }
+    <div class="presets">${BUILTIN_PRESETS.map((preset) => presetCard(preset, false)).join("")}</div>
+    <p class="label section-label">${t("preset.mine")}</p>
+    ${custom.length ? `<div class="presets">${custom.map((preset) => presetCard(preset, true)).join("")}</div>` : `<p class="hint flush">${t("preset.mineEmpty")}</p>`}
+    ${
+      saving
+        ? `<div class="save-form">
+            <label class="sr" for="preset-name">${t("preset.name")}</label>
+            <input id="preset-name" maxlength="40" value="${escape(defaultName)}" />
+            <button type="button" class="stop" id="save-preset">${t("preset.save")}</button>
+            <button type="button" class="text-button" id="cancel-save">${t("preset.cancel")}</button>
+          </div>`
+        : `<button type="button" class="stop with-icon save-button" id="new-preset" ${own && custom.length < MAX_CUSTOM_PRESETS ? "" : "disabled"}>${icon("plus")}${t("preset.saveZone")}</button>
+          ${custom.length >= MAX_CUSTOM_PRESETS ? `<p class="hint flush">${t("preset.full", { limit: MAX_CUSTOM_PRESETS })}</p>` : ""}`
+    }`;
+}
+
+function usePreset(preset: Preset) {
+  const snapshot = snapshotZone(state, zoneId);
+  let skipped = 0;
+  change((draft) => (skipped = applyPreset(draft, zoneId, preset, limits.effects)), false);
+  lastApplied = { snapshot, name: presetName(preset), skipped };
+  render();
+}
+
+function savePreset() {
+  const input = app.querySelector<HTMLInputElement>("#preset-name");
+  const presets = customPresets();
+  if (!input || presets.length >= MAX_CUSTOM_PRESETS) return;
+  if (storeCustomPresets([...presets, capturePreset(state, zoneId, input.value)])) saving = false;
+  render();
+}
+
+// --- Réglages ----------------------------------------------------------------------------------
+
+const LIMIT_KEYS = ["zones", "shapes", "effects"] as const;
+
+function settingsTab() {
+  const quality = qualitySetting();
+  const raised = raisedLimits(limits);
+  return `
+    <section class="settings">
+      <p class="label">${t("settings.limits")}</p>
+      ${LIMIT_KEYS.map(
+        (key) => `
+        <label class="limit">
+          <span>${t(`settings.limit.${key}`)}</span>
+          <input type="number" data-limit="${key}" min="${LIMIT_RANGES[key][0]}" max="${LIMIT_RANGES[key][1]}" step="1" value="${limits[key]}" />
+        </label>`,
+      ).join("")}
+      ${raised.map((key) => `<p class="warning">⚠ ${t(`settings.warn.${key}`)}</p>`).join("")}
+      <p class="hint flush">${t("settings.limitsHelp", { zones: DEFAULT_LIMITS.zones, shapes: DEFAULT_LIMITS.shapes, effects: DEFAULT_LIMITS.effects })}</p>
+    </section>
+    <section class="settings">
+      <p class="label">${t("settings.display")}</p>
+      <div class="segmented" role="group" aria-label="${t("player.quality")}">
+        ${(["auto", ...QUALITIES] as const)
+          .map((value) => `<button type="button" data-quality="${value}" aria-pressed="${value === quality}">${t(`quality.${value}`)}</button>`)
+          .join("")}
+      </div>
+      <p class="hint flush">${t("settings.displayHelp")}</p>
+    </section>`;
 }
 
 let render = renderGM;
@@ -341,8 +529,38 @@ function wireGM() {
     if (!button) return;
     const data = button.dataset;
     if (button.id === "stop") change((draft) => (draft.paused = !draft.paused));
+    else if (data.preset) usePreset(BUILTIN_PRESETS.find((preset) => preset.id === data.preset)!);
+    else if (data.custom) {
+      const preset = customPresets().find((candidate) => candidate.id === data.custom);
+      if (preset) usePreset(preset);
+    } else if (button.id === "undo-preset" && lastApplied) {
+      const { snapshot } = lastApplied;
+      lastApplied = undefined;
+      change((draft) => restoreZone(draft, snapshot));
+    } else if (button.id === "new-preset") {
+      saving = true;
+      render();
+      const input = app.querySelector<HTMLInputElement>("#preset-name");
+      input?.focus();
+      input?.select();
+    } else if (button.id === "save-preset") savePreset();
+    else if (button.id === "cancel-save") {
+      saving = false;
+      render();
+    } else if (data.deletePreset) {
+      if (confirmDelete === data.deletePreset) {
+        confirmDelete = undefined;
+        storeCustomPresets(customPresets().filter((preset) => preset.id !== data.deletePreset));
+      } else confirmDelete = data.deletePreset;
+      render();
+    } else if (data.quality) {
+      setQuality(data.quality as Quality | "auto");
+      render();
+    }
     else if (data.tab) {
       tab = data.tab as Tab;
+      saving = false;
+      confirmDelete = undefined;
       render();
       // Nouvel onglet : on repart du haut.
       app.querySelector<HTMLElement>(".content")?.scrollTo(0, 0);
@@ -387,6 +605,15 @@ function wireGM() {
     const input = event.target as HTMLInputElement | HTMLSelectElement;
     if (input.id === "zone") {
       zoneId = input.value;
+      saving = false;
+      render();
+    } else if ((input as HTMLInputElement).dataset.limit) {
+      const key = (input as HTMLInputElement).dataset.limit as keyof Limits;
+      limits = { ...limits, [key]: parseLimit(key, input.value, limits[key]) };
+      writeLimits(limits).catch((error) => {
+        console.error("[Tempest!]", error);
+        OBR.notification.show(t("panel.saveError"), "ERROR");
+      });
       render();
     } else if (input.id === "time-on") change((draft) => (ownLookOf(draft).time.enabled = (input as HTMLInputElement).checked));
     else if ((input as HTMLInputElement).dataset.filter) {
@@ -407,6 +634,16 @@ function wireGM() {
     },
     true,
   );
+
+  // Nom d'ambiance : Entrée enregistre, Échap renonce.
+  app.addEventListener("keydown", (event) => {
+    if ((event.target as HTMLElement).id !== "preset-name") return;
+    if (event.key === "Enter") savePreset();
+    else if (event.key === "Escape") {
+      saving = false;
+      render();
+    }
+  });
 
   // Sélecteur de couleur quitté : le redessin attendu peut se faire.
   app.addEventListener("focusout", (event) => {
