@@ -115,6 +115,13 @@ export interface TempestState {
   weather: WeatherEffect[];
   /** La première est celle de la scène */
   looks: Look[];
+  /** Durée des transitions douces, en secondes (0 = changement immédiat) */
+  transition: number;
+  /**
+   * Change à chaque changement à faire en douceur (ambiance, effet ajouté ou masqué…). Les curseurs
+   * ne le changent pas : ils agissent tout de suite, ou suivent une transition déjà en cours.
+   */
+  smooth: string;
 }
 
 export const DEFAULT_TIME_COLORS: Record<TimeKey, string> = {
@@ -185,8 +192,13 @@ export function defaultLook(zone: string = SCENE_ZONE): Look {
   };
 }
 
+export const DEFAULT_TRANSITION = 3;
+/** Durées proposées dans le panneau, en secondes. */
+export const TRANSITIONS = [0, 1, 3, 6, 10] as const;
+export const MAX_TRANSITION = 30;
+
 export function defaultState(): TempestState {
-  return { v: STATE_VERSION, paused: false, weather: [], looks: [defaultLook()] };
+  return { v: STATE_VERSION, paused: false, weather: [], looks: [defaultLook()], transition: DEFAULT_TRANSITION, smooth: "" };
 }
 
 /** Réglages de la zone, ou ceux de la scène si elle n'en a pas. */
@@ -253,6 +265,8 @@ export function parseState(value: unknown): TempestState {
   const state = defaultState();
   if (!isObject(value) || value.v !== STATE_VERSION) return state;
   state.paused = value.paused === true;
+  state.transition = clamp(value.transition, 0, MAX_TRANSITION, DEFAULT_TRANSITION);
+  state.smooth = typeof value.smooth === "string" ? value.smooth.slice(0, 64) : "";
 
   const perZone = new Map<string, number>();
   for (const raw of Array.isArray(value.weather) ? value.weather : []) {
@@ -280,6 +294,19 @@ export function addEffect(state: TempestState, effect: WeatherEffect, limit: num
   if (state.weather.filter((other) => other.zone === effect.zone).length >= limit) throw new TooManyEffectsError();
   state.weather.push(effect);
 }
+
+/** Neutres de chaque filtre : à cette valeur, il ne change pas l'image. */
+export const NEUTRAL_FILTERS: Record<FilterKind, number> = {
+  blur: 0,
+  grayscale: 0,
+  sepia: 0,
+  vignette: 0,
+  grain: 0,
+  brightness: 0.5,
+  contrast: 0.5,
+  saturation: 0.5,
+  hue: 0.5,
+};
 
 /** Retire ce qui vise une zone supprimée. */
 export function forgetZone(state: TempestState, zone: string) {

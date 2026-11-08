@@ -18,12 +18,13 @@ import {
   restoreZone,
   snapshotZone,
   type Preset,
-  type ZoneSnapshot,
 } from "../presets";
 import { NATURAL_TINTS } from "../render/shaders";
 import {
   SCENE_ZONE,
   STATE_KEY,
+  TRANSITIONS,
+  defaultLook,
   TIME_KEYS,
   WEATHER_KINDS,
   HIDDEN_FIELDS,
@@ -95,9 +96,13 @@ function write() {
   });
 }
 
-/** Applique un changement tout de suite à l'écran, et l'envoie à la scène sans l'inonder. */
-function change(apply: (draft: TempestState) => void, redraw = true) {
+/**
+ * Applique un changement tout de suite à l'écran, et l'envoie à la scène sans l'inonder.
+ * `smooth` : chez les joueurs, le changement se fait en douceur (durée de l'onglet Ambiances).
+ */
+function change(apply: (draft: TempestState) => void, redraw = true, smooth = false) {
   apply(state);
+  if (smooth) state.smooth = crypto.randomUUID();
   if (redraw) render();
   const wait = 120 - (performance.now() - lastWrite);
   if (wait <= 0) write();
@@ -131,7 +136,67 @@ function zonePicker() {
         .map((option) => `<option value="${option.id}"${option.id === zoneId ? " selected" : ""}>${escape(option.name)}</option>`)
         .join("")}</select>
       <button type="button" class="stop with-icon" id="paint" title="${t("zone.paintTitle")}">${icon("pencil")}${t("zone.paint")}</button>
-    </div>`;
+      <button type="button" class="stop with-icon" id="reset" aria-expanded="${resetting}" title="${t("reset.title")}" ${
+        hasSomething() ? "" : "disabled"
+      }>${icon("reset")}${t("reset.confirm")}</button>
+    </div>
+    ${
+      resetting
+        ? `<div class="undo-bar reset-bar"><span>${resetQuestion()}</span>
+            <div class="reset-choices">${
+              zoneId === SCENE_ZONE && paintedZonesHaveSomething()
+                ? `<button type="button" class="stop" id="reset-scene">${t("reset.sceneOnly")}</button>
+                   <button type="button" class="stop" id="reset-all">${t("reset.all")}</button>`
+                : `<button type="button" class="stop" id="reset-scene">${t("reset.confirm")}</button>`
+            }
+              <button type="button" class="text-button" id="reset-cancel">${t("preset.cancel")}</button>
+            </div></div>`
+        : lastApplied && lastApplied.zone === zoneId
+          ? `<div class="undo-bar"><span>${lastApplied.message}</span><button type="button" class="stop" id="undo-preset">${t("preset.undo")}</button></div>`
+          : ""
+    }`;
+}
+
+/** La zone choisie a de la météo, ou une heure ou des filtres actifs. `others` : les zones peintes aussi. */
+function zoneHasSomething(others = false) {
+  const inZone = (zone: string) => zone === zoneId || (others && zone !== SCENE_ZONE);
+  return state.weather.some((effect) => inZone(effect.zone)) || state.looks.some((look) => inZone(look.zone) && (look.zone !== SCENE_ZONE || lookIsActive(look)));
+}
+const hasSomething = () => zoneHasSomething(zoneId === SCENE_ZONE);
+/** Des zones peintes ont leur propre météo ou leur propre ambiance. */
+const paintedZonesHaveSomething = () => state.weather.some((effect) => effect.zone !== SCENE_ZONE) || state.looks.length > 1;
+
+/** Ce que fera la remise à zéro, dit au MJ avant qu'il confirme. */
+function resetQuestion() {
+  if (zoneId !== SCENE_ZONE) return t("reset.askZone", { name: escape(zoneName(zoneId)) });
+  return paintedZonesHaveSomething() ? t("reset.askSceneWithZones") : t("reset.askScene");
+}
+
+/** Annulation proposée après une ambiance ou une remise à zéro. */
+function offerUndo(zone: string, message: string, restore: (draft: TempestState) => void) {
+  lastApplied = { zone, message, restore };
+}
+
+/** Remet à zéro la zone choisie ; `all` : la scène et toutes ses zones. */
+function resetZone(all = false) {
+  resetting = false;
+  if (all) {
+    const before = { weather: structuredClone(state.weather), looks: structuredClone(state.looks) };
+    change((draft) => {
+      draft.weather = [];
+      draft.looks = [defaultLook()];
+    }, false, true);
+    offerUndo(SCENE_ZONE, t("reset.doneAll"), (draft) => {
+      draft.weather = structuredClone(before.weather);
+      draft.looks = structuredClone(before.looks);
+    });
+  } else {
+    const snapshot = snapshotZone(state, zoneId);
+    // Une zone peinte remise à zéro suit de nouveau la scène.
+    change((draft) => restoreZone(draft, { zone: zoneId, weather: [], look: undefined }), false, true);
+    offerUndo(zoneId, t("reset.done", { name: escape(zoneName(zoneId)) }), (draft) => restoreZone(draft, snapshot));
+  }
+  render();
 }
 
 function effectCard(effect: WeatherEffect) {
@@ -295,7 +360,7 @@ function drawGM() {
   app.innerHTML = `
     <header class="bar">
       <strong>${t("app.name")}</strong>
-      <button type="button" class="stop" id="stop" aria-pressed="${state.paused}">${state.paused ? t("app.resume") : t("app.stopAll")}</button>
+      <button type="button" class="stop with-icon" id="stop" aria-pressed="${state.paused}">${state.paused ? `${icon("play")}${t("app.resume")}` : `${icon("stop")}${t("app.stopAll")}`}</button>
     </header>
     <nav class="tabs" role="tablist">
       ${TABS.map((name) =>
@@ -333,7 +398,10 @@ function storeCustomPresets(presets: Preset[]) {
 }
 
 /** Dernière ambiance appliquée, pour « Annuler ». */
-let lastApplied: { snapshot: ZoneSnapshot; name: string; skipped: number } | undefined;
+/** Dernière ambiance appliquée ou remise à zéro, et de quoi l'annuler. */
+let lastApplied: { zone: string; message: string; restore: (draft: TempestState) => void } | undefined;
+/** Choix « la scène seulement / la scène et ses zones » ouvert. */
+let resetting = false;
 /** Formulaire « Enregistrer cette zone » ouvert. */
 let saving = false;
 /** Ambiance du MJ dont la suppression attend confirmation. */
@@ -410,13 +478,16 @@ function presetsTab() {
   const defaultName = zoneId === SCENE_ZONE ? t("preset.defaultName") : zoneName(zoneId);
   return `
     ${zonePicker()}
-    ${
-      lastApplied && lastApplied.snapshot.zone === zoneId
-        ? `<div class="undo-bar"><span>${t("preset.applied", { name: escape(lastApplied.name) })}${
-            lastApplied.skipped ? ` ${t("preset.skipped", { count: lastApplied.skipped })}` : ""
-          }</span><button type="button" class="stop" id="undo-preset">${t("preset.undo")}</button></div>`
-        : `<p class="hint flush">${t("preset.help")}</p>`
-    }
+    ${lastApplied?.zone === zoneId || resetting ? "" : `<p class="hint flush">${t("preset.help")}</p>`}
+    <div class="transition-row">
+      <span class="label" title="${t("transition.help")}">${t("transition.label")}</span>
+      <div class="segmented" role="group" aria-label="${t("transition.label")}">
+        ${TRANSITIONS.map(
+          (seconds) =>
+            `<button type="button" data-transition="${seconds}" aria-pressed="${state.transition === seconds}">${seconds ? t("transition.seconds", { n: seconds }) : t("transition.none")}</button>`,
+        ).join("")}
+      </div>
+    </div>
     <div class="presets">${BUILTIN_PRESETS.map((preset) => presetCard(preset, false)).join("")}</div>
     <p class="label section-label">${t("preset.mine")}</p>
     ${custom.length ? `<div class="presets">${custom.map((preset) => presetCard(preset, true)).join("")}</div>` : `<p class="hint flush">${t("preset.mineEmpty")}</p>`}
@@ -436,8 +507,12 @@ function presetsTab() {
 function usePreset(preset: Preset) {
   const snapshot = snapshotZone(state, zoneId);
   let skipped = 0;
-  change((draft) => (skipped = applyPreset(draft, zoneId, preset, limits.effects)), false);
-  lastApplied = { snapshot, name: presetName(preset), skipped };
+  change((draft) => (skipped = applyPreset(draft, zoneId, preset, limits.effects)), false, true);
+  offerUndo(
+    zoneId,
+    `${t("preset.applied", { name: escape(presetName(preset)) })}${skipped ? ` ${t("preset.skipped", { count: skipped })}` : ""}`,
+    (draft) => restoreZone(draft, snapshot),
+  );
   render();
 }
 
@@ -528,15 +603,27 @@ function wireGM() {
     const button = target.closest<HTMLButtonElement>("button");
     if (!button) return;
     const data = button.dataset;
-    if (button.id === "stop") change((draft) => (draft.paused = !draft.paused));
+    if (button.id === "stop") change((draft) => (draft.paused = !draft.paused), true, true);
     else if (data.preset) usePreset(BUILTIN_PRESETS.find((preset) => preset.id === data.preset)!);
     else if (data.custom) {
       const preset = customPresets().find((candidate) => candidate.id === data.custom);
       if (preset) usePreset(preset);
     } else if (button.id === "undo-preset" && lastApplied) {
-      const { snapshot } = lastApplied;
+      const { restore } = lastApplied;
       lastApplied = undefined;
-      change((draft) => restoreZone(draft, snapshot));
+      change(restore, true, true);
+    } else if (button.id === "reset") {
+      // On dit d'abord ce qui sera retiré ; la remise à zéro attend la confirmation.
+      lastApplied = undefined;
+      resetting = !resetting;
+      render();
+    } else if (button.id === "reset-scene") resetZone();
+    else if (button.id === "reset-all") resetZone(true);
+    else if (button.id === "reset-cancel") {
+      resetting = false;
+      render();
+    } else if (data.transition) {
+      change((draft) => (draft.transition = Number(data.transition)));
     } else if (button.id === "new-preset") {
       saving = true;
       render();
@@ -561,6 +648,7 @@ function wireGM() {
       tab = data.tab as Tab;
       saving = false;
       confirmDelete = undefined;
+      resetting = false;
       render();
       // Nouvel onglet : on repart du haut.
       app.querySelector<HTMLElement>(".content")?.scrollTo(0, 0);
@@ -571,17 +659,17 @@ function wireGM() {
     } else if (data.add) {
       const effect = defaultEffect(data.add as WeatherKind, zoneId);
       open.add(effect.id);
-      change((draft) => draft.weather.push(effect));
+      change((draft) => draft.weather.push(effect), true, true);
     } else if (data.fold) {
       if (open.has(data.fold)) open.delete(data.fold);
       else open.add(data.fold);
       render();
-    } else if (data.toggle) change(() => (effectById(data.toggle!)!.enabled = !effectById(data.toggle!)!.enabled));
-    else if (data.delete) change((draft) => (draft.weather = draft.weather.filter((effect) => effect.id !== data.delete)));
+    } else if (data.toggle) change(() => (effectById(data.toggle!)!.enabled = !effectById(data.toggle!)!.enabled), true, true);
+    else if (data.delete) change((draft) => (draft.weather = draft.weather.filter((effect) => effect.id !== data.delete)), true, true);
     else if (data.natural) change(() => (effectById(data.natural!)!.color = null));
-    else if (button.id === "own") change((draft) => draft.looks.push({ ...structuredClone(draft.looks[0]), zone: zoneId }));
-    else if (button.id === "follow") change((draft) => (draft.looks = draft.looks.filter((look) => look.zone !== zoneId)));
-    else if (data.moment) change((draft) => (ownLookOf(draft).time.hour = MOMENT_HOURS[data.moment as keyof typeof MOMENT_HOURS]));
+    else if (button.id === "own") change((draft) => draft.looks.push({ ...structuredClone(draft.looks[0]), zone: zoneId }), true, true);
+    else if (button.id === "follow") change((draft) => (draft.looks = draft.looks.filter((look) => look.zone !== zoneId)), true, true);
+    else if (data.moment) change((draft) => (ownLookOf(draft).time.hour = MOMENT_HOURS[data.moment as keyof typeof MOMENT_HOURS]), true, true);
   });
 
   app.addEventListener("input", (event) => {
@@ -606,6 +694,7 @@ function wireGM() {
     if (input.id === "zone") {
       zoneId = input.value;
       saving = false;
+      resetting = false;
       render();
     } else if ((input as HTMLInputElement).dataset.limit) {
       const key = (input as HTMLInputElement).dataset.limit as keyof Limits;
@@ -615,10 +704,10 @@ function wireGM() {
         OBR.notification.show(t("panel.saveError"), "ERROR");
       });
       render();
-    } else if (input.id === "time-on") change((draft) => (ownLookOf(draft).time.enabled = (input as HTMLInputElement).checked));
+    } else if (input.id === "time-on") change((draft) => (ownLookOf(draft).time.enabled = (input as HTMLInputElement).checked), true, true);
     else if ((input as HTMLInputElement).dataset.filter) {
       const kind = (input as HTMLInputElement).dataset.filter;
-      change((draft) => (ownLookOf(draft).filters.find((filter) => filter.kind === kind)!.enabled = (input as HTMLInputElement).checked));
+      change((draft) => (ownLookOf(draft).filters.find((filter) => filter.kind === kind)!.enabled = (input as HTMLInputElement).checked), true, true);
     }
   });
 

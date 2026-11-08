@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { maskFunction, maskSksl, type Stroke } from "../src/render/mask";
-import { gradeSksl, maskOverlaySksl, weatherSksl } from "../src/render/shaders";
+import { maskOverlaySksl, postSksl, weatherSksl } from "../src/render/shaders";
 import { FILTER_KINDS, WEATHER_KINDS } from "../src/state";
 
 /** Uniforms fournis par Owlbear, avec leur type : les redéclarer autrement casse le shader. */
@@ -24,8 +24,15 @@ const zone: Stroke[] = [
 
 describe("shaders", () => {
   const shaders: Record<string, string> = {
-    ...Object.fromEntries(WEATHER_KINDS.map((kind) => [kind, weatherSksl(kind, maskFunction("mask", zone, 70))])),
-    grade: gradeSksl(maskFunction("mask", null, 70), true, [...FILTER_KINDS]),
+    ...Object.fromEntries(WEATHER_KINDS.filter((kind) => kind !== "heat").map((kind) => [kind, weatherSksl(kind, maskFunction("mask", zone, 70))])),
+    grade: postSksl(
+      maskFunction("zm0", zone, 70),
+      [{ prefix: "h0_", mask: "zm0(coord)" }],
+      [
+        { prefix: "l0_", mask: "float l0_mask(vec2 p) { return l0_weight; }", time: true, filters: [...FILTER_KINDS] },
+        { prefix: "l1_", mask: "float l1_mask(vec2 p) { return l1_weight * zm0(p); }", time: false, filters: ["blur", "sepia"] },
+      ],
+    ),
     overlay: maskOverlaySksl(maskFunction("mask", zone, 70)),
   };
 
@@ -52,7 +59,7 @@ describe("shaders", () => {
   });
 
   it("lit la scène en coordonnées écran", () => {
-    expect(shaders.grade).toContain("vec2 screen = (vec3(coord, 1.0) * view).xy;");
+    expect(shaders.grade).toContain("vec2 screen = (vec3(at, 1.0) * view).xy;");
     expect(shaders.grade).toContain("scene.eval(screen)");
   });
 
@@ -76,8 +83,9 @@ describe("simplification d'un coup de pinceau", () => {
 
 describe("filtre flou", () => {
   it("ne relit la scène autour du point que s'il est activé", () => {
-    const mask = maskFunction("mask", null, 0);
-    expect(gradeSksl(mask, false, ["sepia"])).not.toContain("f_blur");
-    expect(gradeSksl(mask, false, ["blur", "sepia"])).toContain("sum += scene.eval");
+    const look = (filters: ("blur" | "sepia")[]) => [{ prefix: "l0_", mask: "float l0_mask(vec2 p) { return 1.0; }", time: false, filters }];
+    expect(postSksl("", [], look(["sepia"]))).not.toContain("f_blur");
+    expect(postSksl("", [], look(["blur", "sepia"]))).toContain("sum += scene.eval");
+    expect(postSksl("", [], look(["sepia"]))).toContain("0.0, 1.0), l0_f_sepia);");
   });
 });

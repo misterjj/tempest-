@@ -167,3 +167,20 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
 }
 .warning { margin: 0; padding: 6px 8px; border-radius: 6px; background: rgb(255 180 60 / 0.14); color: #ffcf7a; font-size: 12px; }
 :root[data-theme="light"] .warning { color: #8a5600; }
+
+/* Réinitialiser : bouton à icône seule, à côté de « Peindre ». */
+.icon-only { display: inline-flex; align-items: center; justify-content: center; padding: 6px; }
+.icon-only .icon { width: 16px; height: 16px; }
+.zone-picker + .undo-bar { margin-top: 8px; }
+.undo-bar { flex-wrap: wrap; }
+
+/* Durée des transitions, dans l'onglet Ambiances. */
+.transition-row { display: flex; align-items: center; gap: 10px; margin: 10px 0 4px; }
+.transition-row .label { flex: none; margin: 0; cursor: help; }
+.transition-row .segmented { flex: 1; }
+.transition-row .segmented button { font-size: 12px; padding: 4px 2px; }
+.reset-bar { flex-direction: column; align-items: stretch; padding: 8px 10px; }
+.reset-choices { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.reset-choices .text-button { margin-left: auto; }
+#reset[aria-expanded="true"] { border-color: var(--accent); color: var(--accent); }
+.bar .with-icon .icon { width: 12px; height: 12px; }

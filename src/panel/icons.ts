@@ -3,6 +3,9 @@
 import type { WeatherKind } from "../state";
 
 const PATHS = {
+  stop: '<rect x="6" y="6" width="12" height="12" rx="1.5" fill="currentColor"/>',
+  play: '<path d="M8 5.5v13l10.5-6.5z" fill="currentColor"/>',
+  reset: '<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/>',
   rain: '<path d="M16 13a4 4 0 0 0-1-7.9A5 5 0 0 0 5.2 7 3.5 3.5 0 0 0 6 13.9"/><path d="M8 16l-1 3M12 16l-1 3M16 16l-1 3"/>',
   snow: '<path d="M12 3v18M4.2 7.5l15.6 9M4.2 16.5l15.6-9"/><path d="M9.5 4.5 12 7l2.5-2.5M9.5 19.5 12 17l2.5 2.5"/>',
   fog: '<path d="M3 8h13M6 12h15M3 16h11M8 20h10"/>',

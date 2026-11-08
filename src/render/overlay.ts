@@ -5,7 +5,8 @@ import { PLUGIN_ID } from "../state";
 import { zoneStrokes, type Zone } from "../zones";
 import { maskFunction } from "./mask";
 import { maskOverlaySksl } from "./shaders";
-import { rgb, type WantedEffect } from "./sync";
+import { rgb } from "./frame";
+import type { WantedEffect } from "./sync";
 
 const SELECTED = 0.42;
 const OTHERS = 0.16;

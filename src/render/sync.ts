@@ -66,8 +66,3 @@ export class EffectSet {
     }
   }
 }
-
-export function rgb(color: string) {
-  const value = Number.parseInt(color.slice(1), 16);
-  return { x: ((value >> 16) & 255) / 255, y: ((value >> 8) & 255) / 255, z: (value & 255) / 255 };
-}
