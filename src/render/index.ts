@@ -7,6 +7,9 @@ import { parseState, STATE_KEY, type TempestState } from "../state";
 import { TOOL_CHANNEL, TOOL_ID, toolSettings, type ToolMessage } from "../tool/tool";
 import { parseZones, ZONES_KEY, type ZonesData } from "../zones";
 import { EMPTY_FRAME, blendFrames, ease, frameOf, type Frame } from "./frame";
+import { FLUIDS_KEY, parseFluids, type FluidsData } from "../fluids";
+import { FLUID_CHANNEL, FLUID_TOOL_ID, fluidToolSettings, type FluidToolMessage } from "../tool/fluid-tool";
+import { wantedArrows, wantedFluids } from "./fluid";
 import { wantedOverlay } from "./overlay";
 import { wantedPost } from "./post";
 import { EffectSet } from "./sync";
@@ -15,6 +18,13 @@ import { wantedWeather } from "./weather";
 const weather = new EffectSet();
 const looks = new EffectSet();
 const overlay = new EffectSet();
+const fluidSet = new EffectSet();
+const arrows = new EffectSet();
+
+let fluids: FluidsData | undefined;
+/** Outil Fluides actif chez le MJ, et coulée choisie : les chevrons du courant les suivent. */
+let tracing = false;
+let selectedFluid: string | null = null;
 
 let state: TempestState | undefined;
 let zones: ZonesData | undefined;
@@ -62,6 +72,9 @@ async function apply() {
   await weather.sync(wantedWeather(frame.weather, zoneList, currentQuality(), unit));
   await looks.sync(wantedPost(frame, zoneList, currentQuality(), unit));
   await overlay.sync(isGM ? wantedOverlay(zoneList, selectedZone, painting, unit) : []);
+  const fluidList = fluids?.fluids ?? [];
+  await fluidSet.sync(on && !state!.paused ? wantedFluids(fluidList, currentQuality(), unit) : []);
+  await arrows.sync(isGM && tracing ? wantedArrows(fluidList, selectedFluid, unit) : []);
 }
 
 function render() {
@@ -89,6 +102,8 @@ export async function startRenderer() {
     weather.forget();
     looks.forget();
     overlay.forget();
+    fluidSet.forget();
+    arrows.forget();
     // Scène ouverte ou rechargée : elle s'affiche telle quelle, sans transition.
     shown = EMPTY_FRAME;
     transition = undefined;
@@ -102,6 +117,7 @@ export async function startRenderer() {
     state = parseState(metadata[STATE_KEY]);
     lastSmooth = state.smooth;
     zones = parseZones(metadata[ZONES_KEY]);
+    fluids = parseFluids(metadata[FLUIDS_KEY]);
     unit = await OBR.scene.grid.getDpi();
     render();
   };
@@ -110,6 +126,7 @@ export async function startRenderer() {
     state = parseState(metadata[STATE_KEY]);
     follow(state);
     zones = parseZones(metadata[ZONES_KEY]);
+    fluids = parseFluids(metadata[FLUIDS_KEY]);
     render();
   });
   // Une grille changée change la taille des gouttes et des fondus.
@@ -121,9 +138,19 @@ export async function startRenderer() {
   if (isGM) {
     painting = (await OBR.tool.getActiveTool()) === TOOL_ID;
     selectedZone = (await toolSettings()).zone;
+    tracing = (await OBR.tool.getActiveTool()) === FLUID_TOOL_ID;
+    selectedFluid = (await fluidToolSettings()).fluid;
     OBR.tool.onToolChange((id) => {
       painting = id === TOOL_ID;
+      tracing = id === FLUID_TOOL_ID;
       render();
+    });
+    OBR.broadcast.onMessage(FLUID_CHANNEL, ({ data }) => {
+      const message = data as FluidToolMessage;
+      if (message.type === "selection") {
+        selectedFluid = message.fluid;
+        render();
+      }
     });
     OBR.broadcast.onMessage(TOOL_CHANNEL, ({ data }) => {
       const message = data as ToolMessage;

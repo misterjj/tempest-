@@ -9,7 +9,7 @@
 import { optionsOf, type FilterKind, type WeatherKind } from "../state";
 import { MASK_HELPERS } from "./mask";
 
-const HEADER = `
+export const HEADER = `
 uniform float time;
 uniform float unit;
 // time est l'heure Unix en secondes : trop grand pour animer sans perdre en précision.

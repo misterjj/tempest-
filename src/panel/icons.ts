@@ -3,6 +3,13 @@
 import type { WeatherKind } from "../state";
 
 const PATHS = {
+  smoke: '<path d="M6 10c-2 0-3-2-2-3.5S7 5 8 6c0-2 3-3 4.5-1.5C14 3 17 4 17 6.5c2 0 3 2 1.5 3.5"/><path d="M4 14h16"/><path d="M6 18c2-1 4 1 6 0s4-1 6 0"/>',
+  pool: '<ellipse cx="12" cy="13" rx="9" ry="6"/><path d="M7 13c1.5-1 3 1 5 0s3.5-1 5 0"/>',
+  waterfall: '<path d="M4 4h16"/><path d="M7 4v11M12 4v13M17 4v11"/><path d="M4 19c2 1.5 4-1 6 .5s4 1.5 6 0 3-1 4 0"/>',
+  shore: '<path d="M3 9c3-2 5 2 9 0s6-2 9 0"/><path d="M3 14c3-2 5 2 9 0s6-2 9 0"/><path d="M3 20h18" stroke-dasharray="1 3"/>',
+  lava: '<path d="M3 15c2-1 3 1 5 0s2-3 4-3 3 3 5 3 3-2 4-2"/><path d="M3 19c2-1 3 1 5 0s3-1 5 0 3 1 5 0"/><path d="M12 9c-1-2 0-4 2-6 0 2 2 3 1 5"/>',
+  water: '<path d="M12 3c3 4 6 7 6 11a6 6 0 0 1-12 0c0-4 3-7 6-11z"/><path d="M9 14a3 3 0 0 0 3 3"/>',
+  swap: '<path d="M4 8h13l-3-3M20 16H7l3 3"/>',
   stop: '<rect x="6" y="6" width="12" height="12" rx="1.5" fill="currentColor"/>',
   play: '<path d="M8 5.5v13l10.5-6.5z" fill="currentColor"/>',
   reset: '<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/>',

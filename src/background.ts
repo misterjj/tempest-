@@ -6,6 +6,7 @@ import { startRenderer } from "./render";
 import { readLimits, updateZones } from "./scene-state";
 import { PANEL_CHANNEL, type PanelMessage } from "./channels";
 import { PLUGIN_ID } from "./state";
+import { setupFluidTool } from "./tool/fluid-tool";
 import { setupTool } from "./tool/tool";
 import { TooManyZonesError, addZone, newZone } from "./zones";
 
@@ -26,6 +27,7 @@ async function zoneFromMap(itemId: string, name: string) {
 OBR.onReady(async () => {
   // L'outil se crée pour tous, mais ses icônes ne s'affichent que pour le MJ.
   setupTool();
+  setupFluidTool();
   await startRenderer();
   OBR.contextMenu.create({
     id: `${PLUGIN_ID}/ajouter-meteo`,

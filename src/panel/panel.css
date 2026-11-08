@@ -184,3 +184,15 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
 .reset-choices .text-button { margin-left: auto; }
 #reset[aria-expanded="true"] { border-color: var(--accent); color: var(--accent); }
 .bar .with-icon .icon { width: 12px; height: 12px; }
+
+/* --- Fluides ------------------------------------------------------------------------------ */
+.fluid-add { grid-template-columns: 1fr 1fr; }
+.fluid-add .icon { width: 15px; height: 15px; }
+.fluid-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.name-row .text-field {
+  flex: 1; min-width: 0; margin-left: 8px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px;
+  background: var(--surface); color: var(--text); font: inherit;
+}
+.confirm-text { width: auto; padding: 0 8px; font-size: 12px; color: #fff; background: #c43c3c; }
+.kind.lava, [data-add-fluid="lava"] .icon:last-of-type { color: #ff7a2a; }
+.kind.water, [data-add-fluid="water"] .icon:last-of-type { color: #3db7e6; }

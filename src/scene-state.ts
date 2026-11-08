@@ -3,6 +3,7 @@
 import OBR from "@owlbear-rodeo/sdk";
 import { MAX_STATE_BYTES, STATE_KEY, forgetZone, parseState, stateBytes, type TempestState } from "./state";
 import { limitsIn, settingsWith, type Limits } from "./limits";
+import { FLUIDS_KEY, MAX_FLUIDS_BYTES, fluidsBytes, parseFluids, type FluidsData } from "./fluids";
 import { MAX_ZONES_BYTES, ZONES_KEY, parseZones, zonesBytes, type ZonesData } from "./zones";
 
 export async function readState(): Promise<TempestState> {
@@ -67,4 +68,29 @@ export async function writeLimits(limits: Limits) {
 
 export function onLimitsChange(callback: (limits: Limits) => void) {
   return OBR.room.onMetadataChange((metadata) => callback(limitsIn(metadata)));
+}
+
+// --- Fluides, sous leur propre clé -------------------------------------------------------------
+
+export async function readFluids(): Promise<FluidsData> {
+  return parseFluids((await OBR.scene.getMetadata())[FLUIDS_KEY]);
+}
+
+export class FluidsTooLargeError extends Error {}
+
+export async function writeFluids(data: FluidsData) {
+  if (fluidsBytes(data) > MAX_FLUIDS_BYTES) throw new FluidsTooLargeError();
+  await OBR.scene.setMetadata({ [FLUIDS_KEY]: data });
+}
+
+/** Modifie les fluides de la scène (MJ seulement). */
+export async function updateFluids(change: (data: FluidsData) => void): Promise<FluidsData> {
+  const data = await readFluids();
+  change(data);
+  await writeFluids(data);
+  return data;
+}
+
+export function onFluidsChange(callback: (data: FluidsData) => void) {
+  return OBR.scene.onMetadataChange((metadata) => callback(parseFluids(metadata[FLUIDS_KEY])));
 }

@@ -7,10 +7,12 @@ import OBR, { buildEffect, isEffect, type BlendMode, type Uniform } from "@owlbe
 export interface WantedEffect {
   id: string;
   sksl: string;
-  layer: "RULER" | "POST_PROCESS" | "CONTROL";
+  layer: "DRAWING" | "RULER" | "POST_PROCESS" | "CONTROL";
   uniforms: Uniform[];
   /** Mélange avec la carte ; SRC_OVER si absent. */
   blend?: BlendMode;
+  /** Ordre dans le calque : un plus grand passe au-dessus. */
+  zIndex?: number;
 }
 
 export class EffectSet {
@@ -40,6 +42,7 @@ export class EffectSet {
             .uniforms(effect.uniforms)
             .blendMode(effect.blend ?? "SRC_OVER")
             .layer(effect.layer)
+            .zIndex(effect.zIndex ?? 0)
             .locked(true)
             .disableHit(true)
             .build(),

@@ -7,7 +7,21 @@ import { currentLanguage, t } from "../i18n";
 import { DEFAULT_LIMITS, LIMIT_RANGES, parseLimit, raisedLimits, type Limits } from "../limits";
 import { QUALITIES, isMuted, qualitySetting, setMuted, setQuality, type Quality } from "../local";
 import { lightAt } from "../render/daylight";
-import { onLimitsChange, onStateChange, onZonesChange, readLimits, readState, readZones, writeLimits } from "../scene-state";
+import {
+  onFluidsChange,
+  onLimitsChange,
+  onStateChange,
+  onZonesChange,
+  readFluids,
+  readLimits,
+  readState,
+  readZones,
+  writeFluids,
+  writeLimits,
+} from "../scene-state";
+import { FLUID_KINDS, FLUID_OPTIONS, addFluid, emptyFluids, fluidCost, newFluid, reverseStroke, TooManyFluidsError, MAX_SEGMENTS, type Fluid, type FluidKind, type FluidsData } from "../fluids";
+import { traceFluid } from "../tool/fluid-tool";
+import { FLUID_COLOR_HINTS } from "../render/fluid";
 import {
   BUILTIN_PRESETS,
   MAX_CUSTOM_PRESETS,
@@ -45,7 +59,7 @@ import type { Zone } from "../zones";
 import { icon, weatherIcon } from "./icons";
 import "./panel.css";
 
-const TABS = ["presets", "weather", "time", "filters", "settings"] as const;
+const TABS = ["presets", "weather", "time", "filters", "fluids", "settings"] as const;
 type Tab = (typeof TABS)[number];
 
 const app = document.querySelector<HTMLDivElement>("#app")!;
@@ -370,7 +384,7 @@ function drawGM() {
       ).join("")}
     </nav>
     <main class="content" role="tabpanel">
-      ${{ presets: presetsTab, weather: weatherTab, time: timeTab, filters: filtersTab, settings: settingsTab }[tab]()}
+      ${{ presets: presetsTab, weather: weatherTab, time: timeTab, filters: filtersTab, fluids: fluidsTab, settings: settingsTab }[tab]()}
     </main>`;
 }
 
@@ -524,6 +538,125 @@ function savePreset() {
   render();
 }
 
+// --- Fluides -----------------------------------------------------------------------------------
+
+let fluids: FluidsData = emptyFluids();
+/** Cartes de coulées dépliées, et coulée dont la suppression attend confirmation. */
+const fluidOpen = new Set<string>();
+let confirmFluidDelete: string | undefined;
+let fluidTimer: ReturnType<typeof setTimeout> | undefined;
+let lastFluidWrite = 0;
+/** Échos des écritures du panneau, à ignorer (voir `written`). */
+const fluidWritten: string[] = [];
+
+function writeFluidsNow() {
+  clearTimeout(fluidTimer);
+  fluidTimer = undefined;
+  lastFluidWrite = performance.now();
+  fluidWritten.push(JSON.stringify(fluids));
+  if (fluidWritten.length > WRITTEN_KEPT) fluidWritten.shift();
+  writeFluids(fluids).catch((error) => {
+    console.error("[Tempest!]", error);
+    OBR.notification.show(t("panel.saveError"), "ERROR");
+  });
+}
+
+/** Comme `change`, pour les coulées (gardées sous leur propre clé). */
+function changeFluids(apply: (data: FluidsData) => void, redraw = true) {
+  apply(fluids);
+  if (redraw) render();
+  const wait = 120 - (performance.now() - lastFluidWrite);
+  if (wait <= 0) writeFluidsNow();
+  else if (!fluidTimer) fluidTimer = setTimeout(writeFluidsNow, wait);
+}
+
+const fluidById = (id: string) => fluids.fluids.find((fluid) => fluid.id === id);
+
+function fluidCard(fluid: Fluid) {
+  const unfolded = fluidOpen.has(fluid.id);
+  const confirming = confirmFluidDelete === fluid.id;
+  const head = `
+    <div class="card-head">
+      <button type="button" class="card-title" data-fluid-fold="${fluid.id}" aria-expanded="${unfolded}">
+        ${icon("chevron", "chevron")}<span class="kind ${fluid.kind}">${icon(fluid.kind)}</span>${escape(fluid.name || t(`fluid.kind.${fluid.kind}`))}
+      </button>
+      <button type="button" class="icon-button" data-fluid-trace="${fluid.id}" title="${t("fluid.traceTitle")}">${icon("pencil")}</button>
+      <button type="button" class="icon-button" data-fluid-toggle="${fluid.id}" aria-pressed="${!fluid.enabled}" title="${t(fluid.enabled ? "fluid.hide" : "fluid.show")}">${icon(fluid.enabled ? "eye" : "eyeOff")}</button>
+      <button type="button" class="icon-button danger ${confirming ? "confirm-text" : ""}" data-fluid-delete="${fluid.id}" title="${t("fluid.delete")}">${
+        confirming ? t("fluid.confirmDelete") : icon("trash")
+      }</button>
+    </div>`;
+  if (!unfolded) return `<div class="card ${fluid.enabled ? "" : "off"}">${head}</div>`;
+  const id = (field: string) => `fluid:${fluid.id}:${field}`;
+  return `
+    <div class="card ${fluid.enabled ? "" : "off"}">
+      ${head}
+      <div class="card-body">
+        <label class="field-row name-row"><span>${t("fluid.name")}</span><input class="text-field" data-fluid-name="${fluid.id}" maxlength="40" value="${escape(fluid.name)}" /></label>
+        <p class="hint flush">${t(`fluid.how.${fluid.kind}`)}</p>
+        <div class="fluid-actions">
+          <button type="button" class="stop with-icon" data-fluid-trace="${fluid.id}">${icon("pencil")}${t("fluid.trace")}</button>
+          <button type="button" class="stop with-icon" data-fluid-reverse="${fluid.id}" ${fluid.strokes.length ? "" : "disabled"}>${icon("swap")}${t("fluid.reverse")}</button>
+        </div>
+        ${range(id("speed"), fluid.speed, 0.25, 3, 0.05, t("fluid.speed"), times(fluid.speed))}
+        ${Object.keys(FLUID_OPTIONS[fluid.kind])
+          .map((key) => range(id(key), fluid.options[key] ?? 0, 0, 1, 0.01, t(`fluid.option.${key}` as Parameters<typeof t>[0]), percent(fluid.options[key] ?? 0)))
+          .join("")}
+        <div class="field-row color-row">
+          <span>${t("fluid.color")}</span>
+          <span>
+            <input type="color" data-fluid-color="${fluid.id}" value="${fluid.color ?? FLUID_COLOR_HINTS[fluid.kind]}" ${fluid.color ? "" : 'class="natural"'} />
+            <button type="button" class="text-button" data-fluid-natural="${fluid.id}" ${fluid.color ? "" : "disabled"}>${t("fluid.natural")}</button>
+          </span>
+        </div>
+        ${range(id("opacity"), fluid.opacity, 0, 1, 0.01, t("fluid.opacity"), percent(fluid.opacity))}
+        <p class="hint flush">${t("fluid.stats", { strokes: fluid.strokes.length, rocks: fluid.rocks.length, segments: fluidCost(fluid), max: MAX_SEGMENTS })}${
+          fluid.sources.length ? t("fluid.statsSources", { sources: fluid.sources.length }) : ""
+        }</p>
+      </div>
+    </div>`;
+}
+
+function fluidsTab() {
+  return `
+    <p class="hint flush">${t("fluid.help")}</p>
+    <div class="add-row fluid-add">
+      ${FLUID_KINDS
+        .map((kind) => `<button type="button" class="stop with-icon" data-add-fluid="${kind}" title="${t(`fluid.how.${kind}`)}">${icon(kind)}${t(`fluid.add.${kind}`)}</button>`)
+        .join("")}
+    </div>
+    ${fluids.fluids.length ? `<div class="cards">${fluids.fluids.map(fluidCard).join("")}</div>` : `<p class="hint flush">${t("fluid.empty")}</p>`}
+    <p class="hint flush">${t("fluid.directionHelp")}</p>`;
+}
+
+/** Nouvelle coulée : elle est choisie dans l'outil, qui s'ouvre pour la tracer. */
+async function addFluidOf(kind: FluidKind) {
+  const count = fluids.fluids.filter((fluid) => fluid.kind === kind).length + 1;
+  const fluid = newFluid(kind, t(`fluid.name.${kind}`, { n: count }));
+  try {
+    changeFluids((data) => addFluid(data, fluid));
+  } catch (error) {
+    if (error instanceof TooManyFluidsError) OBR.notification.show(t("fluid.tooMany"), "WARNING");
+    return;
+  }
+  fluidOpen.add(fluid.id);
+  writeFluidsNow();
+  render();
+  await traceFluid(fluid.id, kind);
+}
+
+function onFluidRange(key: string, value: number) {
+  const [, id, field] = key.split(":");
+  changeFluids((data) => {
+    const fluid = data.fluids.find((candidate) => candidate.id === id);
+    if (!fluid) return;
+    if (field === "speed" || field === "opacity") fluid[field] = value;
+    else fluid.options[field] = value;
+  }, false);
+  const target = app.querySelector<HTMLElement>(`[data-value="${CSS.escape(key)}"]`);
+  if (target) target.textContent = field === "speed" ? times(value) : percent(value);
+}
+
 // --- Réglages ----------------------------------------------------------------------------------
 
 const LIMIT_KEYS = ["zones", "shapes", "effects"] as const;
@@ -561,6 +694,10 @@ const effectById = (id: string) => state.weather.find((effect) => effect.id === 
 
 /** Valeur d'un curseur appliquée à l'état, et son affichage mis à jour sans tout redessiner. */
 function onRange(key: string, value: number) {
+  if (key.startsWith("fluid:")) {
+    onFluidRange(key, value);
+    return;
+  }
   const shown = (text: string) => {
     const target = app.querySelector<HTMLElement>(`[data-value="${CSS.escape(key)}"]`);
     if (target) target.textContent = text;
@@ -640,6 +777,23 @@ function wireGM() {
         storeCustomPresets(customPresets().filter((preset) => preset.id !== data.deletePreset));
       } else confirmDelete = data.deletePreset;
       render();
+    } else if (data.addFluid) addFluidOf(data.addFluid as FluidKind).catch(console.error);
+    else if (data.fluidFold) {
+      if (fluidOpen.has(data.fluidFold)) fluidOpen.delete(data.fluidFold);
+      else fluidOpen.add(data.fluidFold);
+      render();
+    } else if (data.fluidTrace) traceFluid(data.fluidTrace).catch(console.error);
+    else if (data.fluidToggle) changeFluids(() => (fluidById(data.fluidToggle!)!.enabled = !fluidById(data.fluidToggle!)!.enabled));
+    else if (data.fluidReverse) changeFluids(() => fluidById(data.fluidReverse!)?.strokes.forEach(reverseStroke));
+    else if (data.fluidNatural) changeFluids(() => (fluidById(data.fluidNatural!)!.color = null));
+    else if (data.fluidDelete) {
+      if (confirmFluidDelete === data.fluidDelete) {
+        confirmFluidDelete = undefined;
+        changeFluids((draft) => (draft.fluids = draft.fluids.filter((fluid) => fluid.id !== data.fluidDelete)));
+      } else {
+        confirmFluidDelete = data.fluidDelete;
+        render();
+      }
     } else if (data.quality) {
       setQuality(data.quality as Quality | "auto");
       render();
@@ -682,6 +836,12 @@ function wireGM() {
       const natural = app.querySelector<HTMLButtonElement>(`[data-natural="${CSS.escape(input.dataset.color)}"]`);
       if (natural) natural.disabled = false;
     }
+    else if (input.dataset.fluidColor) {
+      changeFluids(() => (fluidById(input.dataset.fluidColor!)!.color = input.value.toLowerCase()), false);
+      input.classList.remove("natural");
+      const natural = app.querySelector<HTMLButtonElement>(`[data-fluid-natural="${CSS.escape(input.dataset.fluidColor)}"]`);
+      if (natural) natural.disabled = false;
+    }
     else if (input.dataset.momentColor) {
       change((draft) => (ownLookOf(draft).time.colors[input.dataset.momentColor as keyof Look["time"]["colors"]] = input.value.toLowerCase()), false);
       const sky = app.querySelector<HTMLInputElement>(".sky");
@@ -704,6 +864,9 @@ function wireGM() {
         OBR.notification.show(t("panel.saveError"), "ERROR");
       });
       render();
+    } else if ((input as HTMLInputElement).dataset.fluidName) {
+      const fluid = fluidById((input as HTMLInputElement).dataset.fluidName!);
+      if (fluid) changeFluids(() => (fluid.name = input.value.trim().slice(0, 40)));
     } else if (input.id === "time-on") change((draft) => (ownLookOf(draft).time.enabled = (input as HTMLInputElement).checked), true, true);
     else if ((input as HTMLInputElement).dataset.filter) {
       const kind = (input as HTMLInputElement).dataset.filter;
@@ -748,6 +911,7 @@ function wireGM() {
     if (!holding) return;
     holding = false;
     if (writeTimer) write();
+    if (fluidTimer) writeFluidsNow();
   });
 }
 
@@ -795,7 +959,7 @@ async function loadScene() {
     renderNoScene();
     return;
   }
-  [state, zones, limits] = await Promise.all([readState(), readZones().then((data) => data.zones), readLimits()]);
+  [state, zones, limits, fluids] = await Promise.all([readState(), readZones().then((data) => data.zones), readLimits(), readFluids()]);
   renderGM();
 }
 
@@ -820,6 +984,12 @@ OBR.onReady(async () => {
   onZonesChange((data) => {
     zones = data.zones;
     if (!holding && state) renderGM();
+  });
+  onFluidsChange((data) => {
+    // Son propre écho, ou un curseur tenu : rien à redessiner.
+    if (fluidWritten.includes(JSON.stringify(data)) || holding || fluidTimer) return;
+    fluids = data;
+    if (state) renderGM();
   });
   onLimitsChange((value) => {
     limits = value;

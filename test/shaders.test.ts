@@ -2,6 +2,14 @@ import { describe, expect, it } from "vitest";
 import { maskFunction, maskSksl, type Stroke } from "../src/render/mask";
 import { maskOverlaySksl, postSksl, weatherSksl } from "../src/render/shaders";
 import { FILTER_KINDS, WEATHER_KINDS } from "../src/state";
+import { arrowsSksl, fluidSksl } from "../src/render/fluid";
+import { FLUID_KINDS, newFluid, type FluidKind } from "../src/fluids";
+
+const flow = (kind: FluidKind) => ({
+  ...newFluid(kind, "", kind),
+  strokes: [{ r: 60, p: [0, 0, 300, 50, 600, 0] }, { r: 30, p: [300, 50, 400, 200] }],
+  rocks: [{ x: 300, y: 40, r: 25 }],
+});
 
 /** Uniforms fournis par Owlbear, avec leur type : les redéclarer autrement casse le shader. */
 const BUILT_IN: Record<string, string> = {
@@ -34,6 +42,8 @@ describe("shaders", () => {
       ],
     ),
     overlay: maskOverlaySksl(maskFunction("mask", zone, 70)),
+    ...Object.fromEntries(FLUID_KINDS.map((kind) => [`fluide ${kind}`, fluidSksl(flow(kind), 150)!])),
+    arrows: arrowsSksl(FLUID_KINDS.map(flow), "lava")!,
   };
 
   it.each(Object.entries(shaders))("%s ne redéclare aucun uniform d'Owlbear sous un autre type", (_, sksl) => {
@@ -50,7 +60,7 @@ describe("shaders", () => {
     ("attribute varying coherent volatile restrict readonly writeonly resource atomic_uint noperspective patch sample " +
       "subroutine common partition active asm class union enum typedef template this goto inline noinline public static " +
       "extern external interface long short double fixed unsigned superp input output filter image sizeof cast namespace " +
-      "using centroid flat smooth layout precise buffer shared invariant lowp mediump highp precision texture sampler").split(" "),
+      "using centroid flat smooth layout precise buffer shared invariant lowp mediump highp precision texture sampler in out inout uniform const").split(" "),
   );
 
   it.each(Object.entries(shaders))("%s n'utilise aucun mot réservé de GLSL comme nom", (_, sksl) => {
