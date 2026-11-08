@@ -124,7 +124,8 @@ async function apply() {
   shown = frame;
   const burst = currentBursts(performance.now(), state);
   if (!isMuted() && burst.extra.length) frame = { ...frame, weather: [...frame.weather, ...burst.extra] };
-  await weather.sync(wantedWeather(frame.weather, zoneList, currentQuality(), unit));
+  const cartoon = state?.style === "cartoon";
+  await weather.sync(wantedWeather(frame.weather, zoneList, currentQuality(), unit, cartoon));
   const lamps = on
     ? state!.lamps.flatMap((lamp) => {
         if (!lamp.item) return [lamp];
@@ -138,7 +139,7 @@ async function apply() {
   );
   await overlay.sync(isGM ? wantedOverlay(zoneList, selectedZone, painting, unit) : []);
   const fluidList = fluids?.fluids ?? [];
-  await fluidSet.sync(on && !state!.paused ? wantedFluids(fluidList, currentQuality(), unit) : []);
+  await fluidSet.sync(on && !state!.paused ? wantedFluids(fluidList, currentQuality(), unit, 1, cartoon) : []);
   await arrows.sync(isGM && tracing ? wantedArrows(fluidList, selectedFluid, unit) : []);
 }
 

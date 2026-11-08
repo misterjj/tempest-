@@ -493,7 +493,55 @@ const WATER_SHADE = `
   float body = mix(0.55, 0.97, depth) * (1.0 - 0.4 * o_clarity) + 0.05;
   col = mix(col, vec3(0.97, 0.99, 1.0), srcJet);
   float a = clamp(max(max(body, foam * 0.9), srcJet), 0.0, 1.0) * inside * opacity;
+  // CARTOON
   return half4(half3(col) * half(a), half(a));
+`;
+
+/**
+ * Fluides en style cartoon (passe commune) : la couleur garde sa teinte mais sa clarté tombe sur
+ * trois paliers, et l'opacité devient franche (rien, mi-transparent, plein).
+ */
+const FLUID_TOON = `
+half4 toonFluid(half4 c) {
+  float a = float(c.a);
+  if (a < 0.12) return half4(0.0);
+  vec3 col = vec3(c.rgb) / a;
+  float lum = dot(col, vec3(0.3, 0.55, 0.15));
+  float level = lum < 0.33 ? 0.22 : lum < 0.66 ? 0.5 : 0.85;
+  col = col * (level / max(lum, 0.02));
+  float aa = a < 0.45 ? 0.55 : 0.95;
+  return half4(half3(clamp(col, 0.0, 1.0) * aa), half(aa));
+}
+`;
+
+/** Remplace le dernier « return X; » d'un rendu par « return toonFluid(X); ». */
+const toonReturn = (shade: string) => shade.replace(/return (half4\(.*\));\s*$/, "return toonFluid($1);\n");
+
+/**
+ * Eau en style cartoon : trois bandes de bleu selon la profondeur, des vaguelettes en
+ * traits clairs, l'écume en aplats blancs cernés, et un trait d'encre le long des rives.
+ */
+const WATER_TOON = `
+  {
+    float band = depth < 0.25 ? 0.0 : depth < 0.6 ? 1.0 : 2.0;
+    vec3 toned = band < 0.5 ? tint * 1.45 + 0.12 : band < 1.5 ? tint * 1.05 + 0.04 : tint * 0.72;
+    // Vaguelettes : petits traits clairs, nets, étirés dans le sens du courant.
+    float ripple = smoothstep(0.66, 0.69, tx.y) * (1.0 - smoothstep(0.72, 0.75, tx.y));
+    toned = mix(toned, vec3(0.9, 0.97, 1.0), ripple * 0.8);
+    // Écume : aplat blanc, cerné d'un trait sombre.
+    float foamBody = smoothstep(0.42, 0.46, foam);
+    float foamLine = smoothstep(0.26, 0.3, foam) * (1.0 - foamBody);
+    toned = mix(toned, tint * 0.35, foamLine);
+    toned = mix(toned, vec3(0.97, 0.99, 1.0), max(foamBody, smoothstep(0.4, 0.45, srcJet)));
+    // Rive : un trait d'encre franc, puis une fine bande claire.
+    float shore = 1.0 - smoothstep(unit * 0.05, unit * 0.07, -d);
+    float shine = (1.0 - smoothstep(unit * 0.11, unit * 0.13, -d)) * (1.0 - shore);
+    toned = mix(toned, vec3(0.92, 0.98, 1.0), shine * 0.7);
+    toned = mix(toned, tint * 0.22, shore);
+    float edge = 1.0 - smoothstep(-unit * 0.01, unit * 0.01, d);
+    col = toned;
+    a = edge * opacity;
+  }
 `;
 
 const WATERFALL = `
@@ -741,14 +789,14 @@ ${sources
  * dehors). Rien n'est dessiné loin du trait : sans ce garde-fou, le sable mouillé s'étalait
  * jusqu'au bord du rectangle englobant (des triangles dans les coins).
  */
-function lineSksl(strokes: PreparedStroke[], kind: FluidKind, sources: Rock[], clip: string) {
+function lineSksl(strokes: PreparedStroke[], kind: FluidKind, sources: Rock[], clip: string, cartoon = false) {
   const raw = strokes.map((stroke) => {
     const pad = stroke.r * 0.45;
     const box: [number, number, number, number] = [stroke.box[0] - pad, stroke.box[1] - pad, stroke.box[2] + pad, stroke.box[3] + pad];
     return { ...stroke, box, map: { ...stroke.map, s0: 0, scale: 1, t0: 0, t1: 0, fromHost: 0, toHost: 0 } };
   });
   const box = unionBox(raw);
-  return `${HEADER}${COMMON}${kind === "shore" ? "uniform float o_waves;\nuniform float o_foam;\n" : WATERFALL}
+  return `${HEADER}${COMMON}${cartoon ? FLUID_TOON : ""}${kind === "shore" ? "uniform float o_waves;\nuniform float o_foam;\n" : WATERFALL}
 ${frameFunctions(raw, "frame", 0)}
 ${MASK_HELPERS}
 ${clip}
@@ -769,7 +817,7 @@ half4 main(float2 coord) {
     .join("\n  ")}
   if (near > rr * 0.35) return half4(0.0);
 ${sourceCode(sources)}
-${kind === "shore" ? SHORE_SHADE : WATERFALL_SHADE}
+${cartoon ? toonReturn(kind === "shore" ? SHORE_SHADE : WATERFALL_SHADE) : kind === "shore" ? SHORE_SHADE : WATERFALL_SHADE}
 }`;
 }
 
@@ -809,7 +857,8 @@ ${lines.map((l) => `  d = min(d, capsule(p, vec2(${f(l.a[0])}, ${f(l.a[1])}), ve
 }`;
 }
 
-export function fluidSksl(fluid: Fluid, unitGuess: number, clipTo: Fluid[] = []) {
+export function fluidSksl(fluid: Fluid, unitGuess: number, clipTo: Fluid[] = [], cartoon = false) {
+  const watery = fluid.kind === "water" || fluid.kind === "pool";
   const margin = MARGIN[fluid.kind] * unitGuess;
   const strokes = prepare(fluid.strokes, fluid.rocks, margin);
   if (!strokes.length) return null;
@@ -821,8 +870,8 @@ export function fluidSksl(fluid: Fluid, unitGuess: number, clipTo: Fluid[] = [])
   const weight = (k: number) =>
     `float w${k} = length(dir${k}) / (pow(max(fr${k}.z${mixing ? ` + mixFront * ${f(strokes[k].r * 0.9)}` : ""}, 1.0) * ${(1 / strokes[k].r).toFixed(5)}, 6.0) + 0.001); dir${k} = normalize(dir${k});`;
   const { ends } = freeEnds(strokes);
-  if (FLUID_SHAPES[fluid.kind] === "line") return lineSksl(strokes, fluid.kind, fluid.sources, clipFunction(clipTo, unitGuess));
-  return `${HEADER}${COMMON}${TEXTURES[fluid.kind]}
+  if (FLUID_SHAPES[fluid.kind] === "line") return lineSksl(strokes, fluid.kind, fluid.sources, clipFunction(clipTo, unitGuess), cartoon);
+  return `${HEADER}${COMMON}${cartoon && !watery ? FLUID_TOON : ""}${TEXTURES[fluid.kind]}
 ${frameFunctions(strokes, "frame", margin)}
 ${aroundFunctions(strokes)}
 half4 main(float2 coord) {
@@ -905,7 +954,7 @@ ${rockCode(fluid.rocks)}
     )
     .join("\n  ")}
 ${sourceCode(fluid.sources)}
-${SHADES[fluid.kind]}
+${cartoon ? (watery ? WATER_SHADE.replace("  // CARTOON", WATER_TOON) : toonReturn(SHADES[fluid.kind]!)) : SHADES[fluid.kind]}
 }`;
 }
 
@@ -1026,23 +1075,23 @@ function watersUnder(fluid: Fluid, all: Fluid[]) {
   });
 }
 
-function cachedSksl(fluid: Fluid, unit: number, all: Fluid[]) {
+function cachedSksl(fluid: Fluid, unit: number, all: Fluid[], cartoon: boolean) {
   const under = watersUnder(fluid, all);
-  const key = JSON.stringify([fluid.kind, fluid.strokes, fluid.rocks, fluid.sources, Math.round(unit), under.map((water) => water.strokes)]);
+  const key = JSON.stringify([fluid.kind, fluid.strokes, fluid.rocks, fluid.sources, Math.round(unit), under.map((water) => water.strokes), cartoon]);
   if (!cache.has(key)) {
     if (cache.size > 64) cache.clear();
-    cache.set(key, fluidSksl(fluid, unit, under));
+    cache.set(key, fluidSksl(fluid, unit, under, cartoon));
   }
   return cache.get(key)!;
 }
 
 /** Coulées posées sur le sol de la carte, sous les pions. `fade` : 0 à 1, pour les transitions. */
-export function wantedFluids(fluids: Fluid[], quality: Quality, unit: number, fade = 1): WantedEffect[] {
+export function wantedFluids(fluids: Fluid[], quality: Quality, unit: number, fade = 1, cartoon = false): WantedEffect[] {
   // Les cascades en dernier : elles se posent sur l'eau qu'elles traversent.
   const ordered = [...fluids.filter((fluid) => fluid.kind !== "waterfall"), ...fluids.filter((fluid) => fluid.kind === "waterfall")];
   return ordered.flatMap((fluid) => {
     if (!fluid.enabled || fluid.opacity <= 0 || fade <= 0) return [];
-    const sksl = cachedSksl(fluid, unit, fluids);
+    const sksl = cachedSksl(fluid, unit, fluids, cartoon);
     if (!sksl) return [];
     return [
       {

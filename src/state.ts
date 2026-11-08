@@ -160,6 +160,8 @@ export interface TempestState {
   /** La première est celle de la scène */
   looks: Look[];
   lamps: Lamp[];
+  /** Style de dessin des effets : réaliste, ou cartoon (aplats, bords nets, traits d'encre) */
+  style: "realistic" | "cartoon";
   /** Durée des transitions douces, en secondes (0 = changement immédiat) */
   transition: number;
   /**
@@ -243,7 +245,7 @@ export const TRANSITIONS = [0, 1, 3, 6, 10] as const;
 export const MAX_TRANSITION = 30;
 
 export function defaultState(): TempestState {
-  return { v: STATE_VERSION, paused: false, weather: [], looks: [defaultLook()], lamps: [], transition: DEFAULT_TRANSITION, smooth: "" };
+  return { v: STATE_VERSION, paused: false, weather: [], looks: [defaultLook()], lamps: [], style: "realistic", transition: DEFAULT_TRANSITION, smooth: "" };
 }
 
 /** Allures proposées : minutes réelles par heure de jeu. */
@@ -328,6 +330,7 @@ export function parseState(value: unknown): TempestState {
   const state = defaultState();
   if (!isObject(value) || value.v !== STATE_VERSION) return state;
   state.paused = value.paused === true;
+  state.style = value.style === "cartoon" ? "cartoon" : "realistic";
   state.transition = clamp(value.transition, 0, MAX_TRANSITION, DEFAULT_TRANSITION);
   state.smooth = typeof value.smooth === "string" ? value.smooth.slice(0, 64) : "";
 

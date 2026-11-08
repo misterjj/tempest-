@@ -761,6 +761,15 @@ function settingsTab() {
       <p class="hint flush">${t("settings.limitsHelp", { zones: DEFAULT_LIMITS.zones, shapes: DEFAULT_LIMITS.shapes, effects: DEFAULT_LIMITS.effects, lamps: DEFAULT_LIMITS.lamps })}</p>
     </section>
     <section class="settings">
+      <p class="label">${t("settings.style")}</p>
+      <div class="segmented" role="group" aria-label="${t("settings.style")}">
+        ${(["realistic", "cartoon"] as const)
+          .map((style) => `<button type="button" data-style="${style}" aria-pressed="${state.style === style}">${t(`settings.style.${style}`)}</button>`)
+          .join("")}
+      </div>
+      <p class="hint flush">${t("settings.styleHelp")}</p>
+    </section>
+    <section class="settings">
       <p class="label">${t("settings.display")}</p>
       <div class="segmented" role="group" aria-label="${t("player.quality")}">
         ${(["auto", ...QUALITIES] as const)
@@ -901,7 +910,8 @@ function wireGM() {
         confirmFluidDelete = data.fluidDelete;
         render();
       }
-    } else if (data.quality) {
+    } else if (data.style) change((draft) => (draft.style = data.style === "cartoon" ? "cartoon" : "realistic"));
+    else if (data.quality) {
       setQuality(data.quality as Quality | "auto");
       render();
     }

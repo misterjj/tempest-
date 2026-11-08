@@ -501,8 +501,47 @@ ${LIGHTNING}`,
 };
 
 /** Shader d'un effet météo, avec la fonction `mask` de sa zone (voir maskFunction). */
-export const weatherSksl = (kind: WeatherKind, mask: string) =>
-  `${HEADER}${WEATHER_UNIFORMS}${optionUniforms(kind)}${NATURAL}${MASK_HELPERS}
+/**
+ * Style cartoon (essai) : les formes deviennent des aplats aux bords nets, cernés d'un trait
+ * d'encre. Le contour est la bande de faible opacité au bord de chaque forme : pas besoin de lire
+ * les pixels voisins. `inner` règle où commence l'aplat, `rim` l'épaisseur du trait.
+ */
+export const TOON = `
+vec4 toon(vec3 color, float alpha, vec3 base, float inner, float rim, float fill, float ownColor) {
+  float body = smoothstep(inner - 0.02, inner + 0.02, alpha);
+  float line = rim > 0.0 ? smoothstep(inner - rim - 0.02, inner - rim + 0.02, alpha) * (1.0 - body) : 0.0;
+  // Deux teintes : ombre et lumière, selon la clarté d'origine. Feuilles et débris gardent leur
+  // propre couleur.
+  vec3 ref = mix(base, color, ownColor);
+  float lum = dot(color, vec3(0.3, 0.55, 0.15)) / max(dot(base, vec3(0.3, 0.55, 0.15)), 0.05);
+  vec3 toned = ref * mix(0.82, 1.12, step(0.95, lum) * (1.0 - ownColor) + ownColor * 0.6);
+  vec3 ink = ref * 0.22;
+  return vec4(mix(ink, toned, body), max(body * fill, line * 0.9));
+}
+`;
+
+/**
+ * Style cartoon de chaque météo : début de l'aplat, épaisseur du trait d'encre (0 : aucun),
+ * opacité de l'aplat, et couleur propre de chaque particule gardée (1) ou non (0).
+ * Formes pleines : un trait d'encre ; effets vaporeux : des aplats translucides, sans trait.
+ */
+const TOON_LEVELS: Record<WeatherKind, [number, number, number, number]> = {
+  rain: [0.55, 0.14, 0.95, 0],
+  snow: [0.42, 0.22, 0.95, 0],
+  hail: [0.4, 0.2, 0.95, 0],
+  fog: [0.14, 0, 0.5, 0],
+  sand: [0.2, 0, 0.6, 1],
+  wind: [0.3, 0.12, 0.85, 1],
+  embers: [0.4, 0.14, 0.95, 1],
+  leaves: [0.45, 0.22, 0.95, 1],
+  fireflies: [0.35, 0.12, 0.95, 1],
+  clouds: [0.22, 0, 0.45, 0],
+  sunrays: [0.25, 0, 0.5, 0],
+  heat: [0.35, 0, 1, 0],
+};
+
+export const weatherSksl = (kind: WeatherKind, mask: string, cartoon = false) =>
+  `${HEADER}${WEATHER_UNIFORMS}${optionUniforms(kind)}${NATURAL}${MASK_HELPERS}${cartoon ? TOON : ""}
 ${mask}
 half4 main(float2 coord) {
   float m = mask(coord);
@@ -511,7 +550,14 @@ half4 main(float2 coord) {
   ${SETUP}
   float alpha = 0.0;
   vec3 color = tint;
-  ${BODIES[kind]}
+  ${cartoon && kind === "rain" ? BODIES.rain.replace("float thin = size * 0.022 * sizeOf(seed);", "float thin = size * 0.06 * sizeOf(seed);").replace("float len = min(", "float len = 0.55 * min(") : BODIES[kind]}${
+    cartoon
+      ? `
+  vec4 styled = toon(color, clamp(alpha, 0.0, 1.0), tint, ${TOON_LEVELS[kind].map((v) => v.toFixed(2)).join(", ")});
+  color = styled.rgb;
+  alpha = styled.a;`
+      : ""
+  }
   float value = clamp(alpha, 0.0, 1.0) * opacity * m;
   return half4(half3(color) * value, value);
 }`;

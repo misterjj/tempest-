@@ -44,6 +44,8 @@ describe("shaders", () => {
     overlay: maskOverlaySksl(maskFunction("mask", zone, 70)),
     ...Object.fromEntries(FLUID_KINDS.map((kind) => [`fluide ${kind}`, fluidSksl(flow(kind), 150)!])),
     arrows: arrowsSksl(FLUID_KINDS.map(flow), "lava")!,
+    ...Object.fromEntries(WEATHER_KINDS.filter((kind) => kind !== "heat").map((kind) => [`${kind} cartoon`, weatherSksl(kind, maskFunction("mask", zone, 70), true)])),
+    ...Object.fromEntries(FLUID_KINDS.map((kind) => [`fluide ${kind} cartoon`, fluidSksl(flow(kind), 150, [], true)!])),
   };
 
   it.each(Object.entries(shaders))("%s ne redéclare aucun uniform d'Owlbear sous un autre type", (_, sksl) => {

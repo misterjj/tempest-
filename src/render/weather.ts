@@ -12,7 +12,7 @@ import type { WantedEffect } from "./sync";
 /** Météos de lumière : elles éclaircissent la carte au lieu de la recouvrir. */
 const LIGHT_KINDS = new Set<WeatherKind>(["sunrays"]);
 
-export function wantedWeather(weather: WeatherFrame[], zones: Zone[], quality: Quality, unit: number): WantedEffect[] {
+export function wantedWeather(weather: WeatherFrame[], zones: Zone[], quality: Quality, unit: number, cartoon = false): WantedEffect[] {
   const byId = new Map(zones.map((zone) => [zone.id, zone]));
   return weather.flatMap((effect) => {
     // La brume de chaleur déforme l'image : elle est dans l'après-rendu (voir post.ts).
@@ -24,7 +24,7 @@ export function wantedWeather(weather: WeatherFrame[], zones: Zone[], quality: Q
     return [
       {
         id: `${PLUGIN_ID}/meteo/${effect.id}`,
-        sksl: weatherSksl(effect.kind, mask),
+        sksl: weatherSksl(effect.kind, mask, cartoon),
         layer: "RULER" as const,
         blend: LIGHT_KINDS.has(effect.kind) ? ("SCREEN" as const) : undefined,
         uniforms: [
