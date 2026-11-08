@@ -11,7 +11,7 @@ export interface WantedEffect {
   uniforms: Uniform[];
   /** Mélange avec la carte ; SRC_OVER si absent. */
   blend?: BlendMode;
-  /** Ordre dans le calque : un plus grand passe au-dessus. */
+  /** Ordre dans le calque : un plus grand passe au-dessus. Absent : l'ordre choisi par Owlbear. */
   zIndex?: number;
 }
 

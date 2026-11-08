@@ -105,3 +105,26 @@ describe("options des météos", () => {
     expect(state.weather[1].options).toEqual({ motes: 0.4 });
   });
 });
+
+describe("lumières", () => {
+  it("lit prudemment les lumières, bornées", async () => {
+    const { HARD_LAMPS: MAX_LAMPS, parseState, defaultState } = await import("../src/state");
+    const lamps = Array.from({ length: MAX_LAMPS + 3 }, (_, i) => ({ id: `l${i}`, item: `i${i}`, radius: 99, color: "#ABCDEF", intensity: 2, flicker: -1 }));
+    const state = parseState({ ...defaultState(), lamps: [{ id: "p", item: "", x: 120.5, y: "?" }, ...lamps, { id: "x" }] });
+    expect(state.lamps).toHaveLength(MAX_LAMPS);
+    expect(state.lamps[0]).toMatchObject({ id: "p", item: "", x: 120.5, y: 0 });
+    expect(state.lamps[1]).toEqual({ id: "l0", item: "i0", x: 0, y: 0, radius: 40, color: "#abcdef", intensity: 1, flicker: 0 });
+  });
+});
+
+describe("heure qui avance", () => {
+  it("avance au rythme choisi, et se fige avant un changement", async () => {
+    const { hourNow, settleHour, defaultLook } = await import("../src/state");
+    const time = { ...defaultLook().time, hour: 23, pace: 10, since: 1_000_000 };
+    // 30 minutes réelles à 10 min/h : 3 heures de jeu, et minuit est passé.
+    expect(hourNow(time, 1_000_000 + 30 * 60000)).toBeCloseTo(2);
+    settleHour(time, 1_000_000 + 30 * 60000);
+    expect(time.hour).toBeCloseTo(2);
+    expect(hourNow({ ...time, pace: 0 }, 9e9)).toBeCloseTo(2);
+  });
+});

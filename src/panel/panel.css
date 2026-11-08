@@ -196,3 +196,14 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
 .confirm-text { width: auto; padding: 0 8px; font-size: 12px; color: #fff; background: #c43c3c; }
 .kind.lava, [data-add-fluid="lava"] .icon:last-of-type { color: #ff7a2a; }
 .kind.water, [data-add-fluid="water"] .icon:last-of-type { color: #3db7e6; }
+
+/* --- Lumières ---------------------------------------------------------------------------- */
+.lamps { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; }
+.lamp-dot { display: inline-block; width: 12px; height: 12px; border-radius: 50%; box-shadow: 0 0 6px currentColor; }
+.lamp-presets { display: flex; flex-wrap: wrap; gap: 6px; }
+
+/* Effets ponctuels, dans la barre du haut. */
+.bar .bursts { display: inline-flex; gap: 2px; margin-left: auto; margin-right: 6px; }
+.bar .burst .icon { width: 17px; height: 17px; }
+.bar .burst:active { transform: scale(0.9); }
+.pace-row { margin-top: 12px; }

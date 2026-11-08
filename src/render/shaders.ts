@@ -619,7 +619,58 @@ vec2 heatOffset(vec2 coord, float angle, float speed, float density, float drops
  * `zoneMasks` : fonctions de masque des zones, partagées par les brumes et les ambiances.
  * Réglages d'une ambiance : tint (teinte), bright, sat, contr (heure) et f_<filtre>.
  */
-export function postSksl(zoneMasks: string, heats: PostHeat[], looks: PostLook[]) {
+/**
+ * Lumières : `lamps` lumières accrochées aux objets (réglages lamp<i> = (x, y, rayon),
+ * lampPower<i>, lampColor<i>, lampFlicker<i> ; Owlbear n'accepte pas de vec4), plus la lueur des
+ * coulées de lave : `glowUniforms` (déclarations) et `glow` (code qui ajoute à col et amount).
+ * Elles ne retirent que la nuit (l'heure du jour) : les filtres restent.
+ */
+function lightCode(lamps: number, glowUniforms: string, glow: string) {
+  if (!lamps && !glow) return "";
+  return `
+${Array.from({ length: lamps }, (_, i) => `uniform vec3 lamp${i};\nuniform float lampPower${i};\nuniform vec3 lampColor${i};\nuniform float lampFlicker${i};`).join("\n")}
+${glowUniforms}
+// Lumière en p : couleur dominante (rgb) et force (a), de 0 à 1.
+vec4 lightAt(vec2 p) {
+  vec3 col = vec3(0.0);
+  float amount = 0.0;
+${Array.from(
+  { length: lamps },
+  (_, i) => `  {
+    vec2 d = p - lamp${i}.xy;
+    float dist = length(d);
+    if (dist < lamp${i}.z) {
+      // Comme aux règles : lumière vive jusqu'à mi-rayon, puis pénombre jusqu'au bord.
+      float bright = 1.0 - smoothstep(lamp${i}.z * 0.42, lamp${i}.z * 0.56, dist);
+      float dim = 0.5 * (1.0 - smoothstep(lamp${i}.z * 0.5, lamp${i}.z, dist));
+      float k = max(bright, dim);
+      // Flamme : vacille, et la lumière tremble un peu plus au bord.
+      float c = clock();
+      float flick = 1.0 - lampFlicker${i} * (0.18 + 0.12 * sin(c * 11.0 + ${f(i * 2.3)})) * (0.6 + 0.4 * vnoise(vec2(c * 7.0, ${f(i * 5.1)})));
+      float a = clamp(k * lampPower${i} * flick, 0.0, 1.0);
+      col += lampColor${i} * a;
+      amount = 1.0 - (1.0 - amount) * (1.0 - a);
+    }
+  }`,
+).join("\n")}
+${glow}
+  return vec4(col / max(amount, 0.0001) * min(amount * 3.0, 1.0), amount);
+}
+`;
+}
+
+const f = (value: number) => {
+  const text = (Math.round(value * 100) / 100).toString();
+  return text.includes(".") ? text : `${text}.0`;
+};
+
+/**
+ * `bursts` : effets ponctuels envoyés par le MJ. Réglages flash (0 à 1, éclat blanc d'un éclair)
+ * et shakeX, shakeY (décalage de la carte, en unités de carte, pour une secousse). Deux nombres
+ * plutôt qu'un vec2 : tous nos réglages sont des nombres ou des vec3, les seuls types sûrs.
+ */
+export function postSksl(zoneMasks: string, heats: PostHeat[], looks: PostLook[], lamps = 0, glowUniforms = "", glow = "", bursts = false) {
+  const lit = lamps > 0 || glow !== "";
   const heatUniforms = heats.flatMap((heat) => HEAT_UNIFORMS.map((name) => `uniform float ${heat.prefix}${name};`));
   const lookUniforms = looks.flatMap((look) => [
     `uniform float ${look.prefix}weight;`,
@@ -662,10 +713,19 @@ export function postSksl(zoneMasks: string, heats: PostHeat[], looks: PostLook[]
         vec3 rgb = vec3(src.rgb) / float(src.a);${
           look.time
             ? `
-        // Désaturer d'abord, puis teinter : la teinte de la nuit reste visible.
+        // Désaturer d'abord, puis teinter : la teinte de la nuit reste visible.${lit ? "\n        vec3 unlit = rgb;" : ""}
         rgb = mix(vec3(dot(rgb, vec3(0.299, 0.587, 0.114))), rgb, ${u("sat")});
         rgb = rgb * ${u("tint")} * ${u("bright")};
-        rgb = (rgb - 0.5) * ${u("contr")} + 0.5;`
+        rgb = (rgb - 0.5) * ${u("contr")} + 0.5;${
+          lit
+            ? `
+        // Lumières : la nuit recule autour d'elles, et leur couleur réchauffe ce qu'elles éclairent.
+        if (light.a > 0.001) {
+          vec3 warm = unlit * mix(vec3(1.0), light.rgb * 1.25, 0.45);
+          rgb = mix(rgb, warm, light.a);
+        }`
+            : ""
+        }`
             : ""
         }
         ${filterCode}
@@ -686,11 +746,19 @@ ${MASK_HELPERS}
 ${zoneMasks}
 ${looks.map((look) => look.mask).join("\n")}
 ${heats.length ? HEAT_OFFSET : ""}
+${lightCode(lamps, glowUniforms, glow)}
+${bursts ? "uniform float flash;\nuniform float shakeX;\nuniform float shakeY;" : ""}
 half4 main(float2 coord) {
-  vec2 at = coord;${heatCode.join("")}
-  vec2 screen = (vec3(at, 1.0) * view).xy;
+  vec2 at = coord${bursts ? " + vec2(shakeX, shakeY)" : ""};${heatCode.join("")}
+  vec2 screen = (vec3(at, 1.0) * view).xy;${lit ? "\n  vec4 light = lightAt(coord);" : ""}
   half4 base = scene.eval(screen);
-  half4 c = base;${lookCode.join("")}
+  half4 c = base;${lookCode.join("")}${
+    bursts
+      ? `
+  // Éclair : la scène blanchit d'un coup, la nuit comprise.
+  if (flash > 0.0) c = half4(mix(c.rgb, half3(0.93, 0.96, 1.0) * c.a, half(flash)), c.a);`
+      : ""
+  }
   return c;
 }`;
 }

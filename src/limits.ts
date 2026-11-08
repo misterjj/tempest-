@@ -3,7 +3,7 @@
 // sa table. Ce qui existe déjà au-delà d'une nouvelle limite reste en place, mais on ne peut plus
 // en ajouter. Ce fichier ne dépend pas d'Owlbear.
 
-import { HARD_EFFECTS_PER_ZONE, PLUGIN_ID } from "./state";
+import { HARD_EFFECTS_PER_ZONE, HARD_LAMPS, PLUGIN_ID } from "./state";
 
 /** Réglages de la salle (métadonnées de la salle, pas de la scène). */
 export const SETTINGS_KEY = `${PLUGIN_ID}/settings`;
@@ -18,19 +18,27 @@ export interface Limits {
   shapes: number;
   /** Effets météo par zone */
   effects: number;
+  /** Lumières par scène : chacune est calculée sur tout l'écran, à chaque image et chez chaque joueur. */
+  lamps: number;
 }
 
-export const DEFAULT_LIMITS: Limits = { zones: 10, shapes: 300, effects: 6 };
+export const DEFAULT_LIMITS: Limits = { zones: 10, shapes: 300, effects: 6, lamps: 16 };
 
 /** Bornes des réglages : au-delà, même une table puissante ne suivrait plus. */
 export const LIMIT_RANGES: Record<keyof Limits, [number, number]> = {
   zones: [1, 40],
   shapes: [10, 2000],
   effects: [1, HARD_EFFECTS_PER_ZONE],
+  lamps: [1, HARD_LAMPS],
 };
 
 /** Plus haute valeur possible : la lecture des données ne coupe jamais en dessous. */
-export const HARD_LIMITS: Limits = { zones: LIMIT_RANGES.zones[1], shapes: LIMIT_RANGES.shapes[1], effects: LIMIT_RANGES.effects[1] };
+export const HARD_LIMITS: Limits = {
+  zones: LIMIT_RANGES.zones[1],
+  shapes: LIMIT_RANGES.shapes[1],
+  effects: LIMIT_RANGES.effects[1],
+  lamps: LIMIT_RANGES.lamps[1],
+};
 
 const readLimit = (key: keyof Limits, value: unknown) =>
   typeof value === "number" && Number.isInteger(value) && value >= LIMIT_RANGES[key][0] && value <= LIMIT_RANGES[key][1]
@@ -43,6 +51,7 @@ export function limitsIn(metadata: Record<string, unknown>): Limits {
     zones: readLimit("zones", settings?.limits?.zones),
     shapes: readLimit("shapes", settings?.limits?.shapes),
     effects: readLimit("effects", settings?.limits?.effects),
+    lamps: readLimit("lamps", settings?.limits?.lamps),
   };
 }
 

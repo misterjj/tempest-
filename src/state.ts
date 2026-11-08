@@ -81,6 +81,12 @@ export type TimeKey = (typeof TIME_KEYS)[number];
 
 export interface TimeOfDay {
   enabled: boolean;
+  /**
+   * L'heure avance seule : minutes réelles par heure de jeu (0 = arrêtée). L'heure affichée vaut
+   * `hour` plus le temps écoulé depuis `since` (horloge en millisecondes).
+   */
+  pace: number;
+  since: number;
   /** 0 à 24 */
   hour: number;
   /** Teinte de chaque point clé (aube 6 h, jour 12 h, crépuscule 19 h, nuit 23 h) */
@@ -108,6 +114,44 @@ export interface Look {
   filters: Filter[];
 }
 
+/**
+ * Lumière : accrochée à un objet de la carte (pion, décor), elle le suit quand il bouge ; sans
+ * objet, elle est fixée en (x, y). Elle perce la nuit de l'heure du jour autour d'elle.
+ */
+export interface Lamp {
+  id: string;
+  /** Objet porteur, ou "" pour une lumière fixe */
+  item: string;
+  /** Position d'une lumière fixe, en coordonnées de la carte */
+  x: number;
+  y: number;
+  /** Rayon, en cases */
+  radius: number;
+  /** Couleur « #rrggbb » */
+  color: string;
+  /** 0 à 1 */
+  intensity: number;
+  /** Vacillement d'une flamme, 0 à 1 */
+  flicker: number;
+}
+
+export const LAMP_PRESETS = {
+  torch: { radius: 8, color: "#ffb15c", intensity: 0.9, flicker: 0.5 },
+  lantern: { radius: 12, color: "#ffd59a", intensity: 0.85, flicker: 0.15 },
+  campfire: { radius: 6, color: "#ff9a3c", intensity: 1, flicker: 0.7 },
+  candle: { radius: 2, color: "#ffc27a", intensity: 0.8, flicker: 0.6 },
+  magic: { radius: 8, color: "#8fb8ff", intensity: 0.8, flicker: 0.1 },
+} as const;
+export type LampPreset = keyof typeof LAMP_PRESETS;
+/** Plus haute limite de lumières réglable (voir limits.ts, qui ne peut pas être importé ici). */
+export const HARD_LAMPS = 64;
+/** Clé posée sur l'objet porteur : le menu contextuel sait s'il a déjà une lumière. */
+export const LAMP_KEY = "com.tempest/lumiere";
+
+export function newLamp(item: string, preset: LampPreset = "torch", id: string = crypto.randomUUID(), at = { x: 0, y: 0 }): Lamp {
+  return { id, item, x: Math.round(at.x), y: Math.round(at.y), ...LAMP_PRESETS[preset] };
+}
+
 export interface TempestState {
   v: typeof STATE_VERSION;
   /** « Tout couper » : rien n'est dessiné, les réglages sont gardés. */
@@ -115,6 +159,7 @@ export interface TempestState {
   weather: WeatherEffect[];
   /** La première est celle de la scène */
   looks: Look[];
+  lamps: Lamp[];
   /** Durée des transitions douces, en secondes (0 = changement immédiat) */
   transition: number;
   /**
@@ -187,7 +232,7 @@ export function defaultEffect(kind: WeatherKind, zone: string = SCENE_ZONE, id: 
 export function defaultLook(zone: string = SCENE_ZONE): Look {
   return {
     zone,
-    time: { enabled: false, hour: 12, colors: { ...DEFAULT_TIME_COLORS } },
+    time: { enabled: false, hour: 12, pace: 0, since: 0, colors: { ...DEFAULT_TIME_COLORS } },
     filters: FILTER_KINDS.map((kind) => ({ kind, enabled: false, amount: 0.5 })),
   };
 }
@@ -198,7 +243,23 @@ export const TRANSITIONS = [0, 1, 3, 6, 10] as const;
 export const MAX_TRANSITION = 30;
 
 export function defaultState(): TempestState {
-  return { v: STATE_VERSION, paused: false, weather: [], looks: [defaultLook()], transition: DEFAULT_TRANSITION, smooth: "" };
+  return { v: STATE_VERSION, paused: false, weather: [], looks: [defaultLook()], lamps: [], transition: DEFAULT_TRANSITION, smooth: "" };
+}
+
+/** Allures proposées : minutes réelles par heure de jeu. */
+export const TIME_PACES = [0, 1, 5, 10, 60] as const;
+
+/** Heure du moment, l'avancée automatique comprise. */
+export function hourNow(time: TimeOfDay, now: number) {
+  if (!time.pace || !time.since) return time.hour;
+  const elapsed = Math.max(0, now - time.since) / 60000 / time.pace;
+  return (((time.hour + elapsed) % 24) + 24) % 24;
+}
+
+/** Fige l'heure du moment dans `hour` (avant de la changer, ou d'en changer l'allure). */
+export function settleHour(time: TimeOfDay, now: number) {
+  time.hour = Math.round(hourNow(time, now) * 100) / 100;
+  time.since = time.pace ? now : 0;
 }
 
 /** Réglages de la zone, ou ceux de la scène si elle n'en a pas. */
@@ -243,6 +304,8 @@ export function parseLook(value: unknown): Look | null {
   if (isObject(value.time)) {
     look.time.enabled = value.time.enabled === true;
     look.time.hour = clamp(value.time.hour, 0, 24, look.time.hour);
+    look.time.pace = clamp(value.time.pace, 0, 600, 0);
+    look.time.since = clamp(value.time.since, 0, 1e15, 0);
     const colors = isObject(value.time.colors) ? value.time.colors : {};
     for (const key of TIME_KEYS) if (isColor(colors[key])) look.time.colors[key] = (colors[key] as string).toLowerCase();
   }
@@ -276,6 +339,21 @@ export function parseState(value: unknown): TempestState {
     if (count >= HARD_EFFECTS_PER_ZONE) continue;
     perZone.set(effect.zone, count + 1);
     state.weather.push(effect);
+  }
+
+  for (const raw of Array.isArray(value.lamps) ? value.lamps : []) {
+    if (state.lamps.length >= HARD_LAMPS) break;
+    if (!isObject(raw) || typeof raw.id !== "string" || typeof raw.item !== "string") continue;
+    state.lamps.push({
+      id: raw.id.slice(0, 64),
+      item: raw.item.slice(0, 64),
+      x: clamp(raw.x, -1e7, 1e7, 0),
+      y: clamp(raw.y, -1e7, 1e7, 0),
+      radius: clamp(raw.radius, 0.5, 40, 8),
+      color: isColor(raw.color) ? raw.color.toLowerCase() : "#ffb15c",
+      intensity: clamp(raw.intensity, 0, 1, 0.9),
+      flicker: clamp(raw.flicker, 0, 1, 0.5),
+    });
   }
 
   const looks = new Map<string, Look>();

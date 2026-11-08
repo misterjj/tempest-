@@ -3,6 +3,7 @@
 // joueur et sans rien envoyer sur le réseau. Ce fichier ne dépend pas d'Owlbear.
 
 import {
+  hourNow,
   NEUTRAL_FILTERS,
   SCENE_ZONE,
   type FilterKind,
@@ -89,7 +90,7 @@ export function frameOf(state: TempestState, zoneIds: Set<string>): Frame {
       .map((look) => ({
         zone: look.zone,
         weight: 1,
-        light: look.time.enabled ? lightAt(look.time.hour, look.time.colors) : null,
+        light: look.time.enabled ? lightAt(hourNow(look.time, Date.now()), look.time.colors) : null,
         filters: Object.fromEntries(look.filters.filter((filter) => filter.enabled).map((filter) => [filter.kind, filter.amount])),
       })),
   };

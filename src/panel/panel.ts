@@ -37,9 +37,16 @@ import { NATURAL_TINTS } from "../render/shaders";
 import {
   SCENE_ZONE,
   STATE_KEY,
+  LAMP_KEY,
+  LAMP_PRESETS,
+  type Lamp,
+  type LampPreset,
   TRANSITIONS,
   defaultLook,
   TIME_KEYS,
+  TIME_PACES,
+  hourNow,
+  settleHour,
   WEATHER_KINDS,
   HIDDEN_FIELDS,
   OPTION_KEYS,
@@ -53,7 +60,7 @@ import {
   type WeatherEffect,
   type WeatherKind,
 } from "../state";
-import { PANEL_CHANNEL, type PanelMessage } from "../channels";
+import { BURST_CHANNEL, BURST_KINDS, PANEL_CHANNEL, type BurstKind, type BurstMessage, type PanelMessage } from "../channels";
 import { TOOL_ID, setToolSettings } from "../tool/tool";
 import type { Zone } from "../zones";
 import { icon, weatherIcon } from "./icons";
@@ -307,25 +314,98 @@ function skyGradient(look: Look) {
   return `linear-gradient(90deg, ${stops.join(", ")})`;
 }
 
+// --- Lumières --------------------------------------------------------------------------------
+
+/** Nom des objets porteurs, lu dans la scène (un objet supprimé n'a plus de nom). */
+let itemNames = new Map<string, string>();
+const lampOpen = new Set<string>();
+
+function lampCard(lamp: Lamp) {
+  const unfolded = lampOpen.has(lamp.id);
+  const name = itemNames.get(lamp.item);
+  const id = (field: string) => `lamp:${lamp.id}:${field}`;
+  const head = `
+    <div class="card-head">
+      <button type="button" class="card-title" data-lamp-fold="${lamp.id}" aria-expanded="${unfolded}">
+        ${icon("chevron", "chevron")}<span class="kind lamp-dot" style="background:${lamp.color}"></span>${
+          !lamp.item ? t("lamp.fixed") : name === undefined ? `<em>${t("lamp.missing")}</em>` : escape(name || t("lamp.unnamed"))
+        }
+        <span class="summary">${t("lamp.radiusShort", { n: lamp.radius })}</span>
+      </button>
+      <button type="button" class="icon-button danger" data-lamp-delete="${lamp.id}" title="${t("lamp.remove")}">${icon("trash")}</button>
+    </div>`;
+  if (!unfolded) return `<div class="card">${head}</div>`;
+  return `
+    <div class="card">
+      ${head}
+      <div class="card-body">
+        <div class="lamp-presets">${(Object.keys(LAMP_PRESETS) as LampPreset[])
+          .map((preset) => `<button type="button" class="stop" data-lamp-preset="${lamp.id}:${preset}">${t(`lamp.preset.${preset}`)}</button>`)
+          .join("")}</div>
+        ${range(id("radius"), lamp.radius, 0.5, 30, 0.5, t("lamp.radius"), t("lamp.radiusShort", { n: lamp.radius }))}
+        ${range(id("intensity"), lamp.intensity, 0, 1, 0.01, t("lamp.intensity"), percent(lamp.intensity))}
+        ${range(id("flicker"), lamp.flicker, 0, 1, 0.01, t("lamp.flicker"), percent(lamp.flicker))}
+        <div class="field-row color-row"><span>${t("lamp.color")}</span><input type="color" data-lamp-color="${lamp.id}" value="${lamp.color}" /></div>
+      </div>
+    </div>`;
+}
+
+function lampsSection() {
+  return `
+    <section class="lamps">
+      <p class="label section-label">${t("lamp.title")}</p>
+      ${state.lamps.length ? `<div class="cards">${state.lamps.map(lampCard).join("")}</div>` : ""}
+      <p class="hint flush">${t("lamp.help")}</p>
+    </section>`;
+}
+
+/** Retire des lumières, et la marque posée sur leur objet. */
+function removeLamps(ids: string[]) {
+  const items = state.lamps.filter((lamp) => ids.includes(lamp.id)).map((lamp) => lamp.item);
+  change((draft) => (draft.lamps = draft.lamps.filter((lamp) => !ids.includes(lamp.id))));
+  const others = new Set(state.lamps.map((lamp) => lamp.item));
+  const freed = items.filter((item) => item && !others.has(item) && itemNames.has(item));
+  if (freed.length) OBR.scene.items.updateItems(freed, (list) => list.forEach((item) => delete item.metadata[LAMP_KEY])).catch(console.error);
+}
+
+function onLampRange(key: string, value: number) {
+  const [, id, field] = key.split(":") as [string, string, "radius" | "intensity" | "flicker"];
+  change((draft) => {
+    const lamp = draft.lamps.find((candidate) => candidate.id === id);
+    if (lamp) lamp[field] = value;
+  }, false);
+  const target = app.querySelector<HTMLElement>(`[data-value="${CSS.escape(key)}"]`);
+  if (target) target.textContent = field === "radius" ? t("lamp.radiusShort", { n: value }) : percent(value);
+}
+
 function timeTab() {
   const look = ownLook();
-  if (!look) return `${zonePicker()}${followsScene()}`;
+  if (!look) return `${zonePicker()}${followsScene()}${lampsSection()}`;
   const time = look.time;
   return `
     ${zonePicker()}
     <label class="switch big"><input type="checkbox" id="time-on" ${time.enabled ? "checked" : ""} /><span>${t("time.enable")}</span>${followButton()}</label>
     <div class="clock ${time.enabled ? "" : "muted"}">
-      <p class="hour" data-value="hour">${hourText(time.hour)}</p>
-      <input type="range" class="sky" data-range="hour" min="0" max="24" step="0.25" value="${time.hour}" style="background:${skyGradient(look)}" />
+      <p class="hour" data-value="hour">${hourText(hourNow(time, Date.now()))}</p>
+      <input type="range" class="sky" data-range="hour" min="0" max="24" step="0.25" value="${hourNow(time, Date.now())}" style="background:${skyGradient(look)}" />
       <div class="ticks"><span>0 h</span><span>6 h</span><span>12 h</span><span>18 h</span><span>24 h</span></div>
       <div class="moments">
         ${TIME_KEYS.map((key) => `<button type="button" class="stop" data-moment="${key}">${t(`time.${key}`)}</button>`).join("")}
+      </div>
+      <div class="transition-row pace-row">
+        <span class="label" title="${t("time.paceHelp")}">${t("time.pace")}</span>
+        <div class="segmented" role="group" aria-label="${t("time.pace")}">
+          ${TIME_PACES.map(
+            (pace) => `<button type="button" data-pace="${pace}" aria-pressed="${time.pace === pace}">${pace ? t("time.paceValue", { n: pace }) : t("time.paceOff")}</button>`,
+          ).join("")}
+        </div>
       </div>
       <p class="label">${t("time.colors")}</p>
       <div class="moment-colors">
         ${TIME_KEYS.map((key) => `<label><input type="color" data-moment-color="${key}" value="${time.colors[key]}" />${t(`time.${key}`)} <small>${MOMENT_HOURS[key]} h</small></label>`).join("")}
       </div>
-    </div>`;
+    </div>
+    ${lampsSection()}`;
 }
 
 function filtersTab() {
@@ -374,6 +454,9 @@ function drawGM() {
   app.innerHTML = `
     <header class="bar">
       <strong>${t("app.name")}</strong>
+      <span class="bursts">${BURST_KINDS.map(
+        (kind) => `<button type="button" class="icon-button burst" data-burst="${kind}" title="${t(`burst.${kind}`)}" aria-label="${t(`burst.${kind}`)}">${icon(`burst-${kind}`)}</button>`,
+      ).join("")}</span>
       <button type="button" class="stop with-icon" id="stop" aria-pressed="${state.paused}">${state.paused ? `${icon("play")}${t("app.resume")}` : `${icon("stop")}${t("app.stopAll")}`}</button>
     </header>
     <nav class="tabs" role="tablist">
@@ -659,7 +742,7 @@ function onFluidRange(key: string, value: number) {
 
 // --- Réglages ----------------------------------------------------------------------------------
 
-const LIMIT_KEYS = ["zones", "shapes", "effects"] as const;
+const LIMIT_KEYS = ["zones", "shapes", "effects", "lamps"] as const;
 
 function settingsTab() {
   const quality = qualitySetting();
@@ -675,7 +758,7 @@ function settingsTab() {
         </label>`,
       ).join("")}
       ${raised.map((key) => `<p class="warning">⚠ ${t(`settings.warn.${key}`)}</p>`).join("")}
-      <p class="hint flush">${t("settings.limitsHelp", { zones: DEFAULT_LIMITS.zones, shapes: DEFAULT_LIMITS.shapes, effects: DEFAULT_LIMITS.effects })}</p>
+      <p class="hint flush">${t("settings.limitsHelp", { zones: DEFAULT_LIMITS.zones, shapes: DEFAULT_LIMITS.shapes, effects: DEFAULT_LIMITS.effects, lamps: DEFAULT_LIMITS.lamps })}</p>
     </section>
     <section class="settings">
       <p class="label">${t("settings.display")}</p>
@@ -694,6 +777,10 @@ const effectById = (id: string) => state.weather.find((effect) => effect.id === 
 
 /** Valeur d'un curseur appliquée à l'état, et son affichage mis à jour sans tout redessiner. */
 function onRange(key: string, value: number) {
+  if (key.startsWith("lamp:")) {
+    onLampRange(key, value);
+    return;
+  }
   if (key.startsWith("fluid:")) {
     onFluidRange(key, value);
     return;
@@ -703,7 +790,11 @@ function onRange(key: string, value: number) {
     if (target) target.textContent = text;
   };
   if (key === "hour") {
-    change((draft) => (ownLookOf(draft).time.hour = value), false);
+    change((draft) => {
+      const time = ownLookOf(draft).time;
+      time.hour = value;
+      if (time.pace) time.since = Date.now();
+    }, false);
     shown(hourText(value));
     return;
   }
@@ -740,6 +831,11 @@ function wireGM() {
     const button = target.closest<HTMLButtonElement>("button");
     if (!button) return;
     const data = button.dataset;
+    if (data.burst) {
+      const message: BurstMessage = { kind: data.burst as BurstKind };
+      OBR.broadcast.sendMessage(BURST_CHANNEL, message, { destination: "ALL" }).catch(console.error);
+      return;
+    }
     if (button.id === "stop") change((draft) => (draft.paused = !draft.paused), true, true);
     else if (data.preset) usePreset(BUILTIN_PRESETS.find((preset) => preset.id === data.preset)!);
     else if (data.custom) {
@@ -777,6 +873,17 @@ function wireGM() {
         storeCustomPresets(customPresets().filter((preset) => preset.id !== data.deletePreset));
       } else confirmDelete = data.deletePreset;
       render();
+    } else if (data.lampFold) {
+      if (lampOpen.has(data.lampFold)) lampOpen.delete(data.lampFold);
+      else lampOpen.add(data.lampFold);
+      render();
+    } else if (data.lampDelete) removeLamps([data.lampDelete]);
+    else if (data.lampPreset) {
+      const [id, preset] = data.lampPreset.split(":") as [string, LampPreset];
+      change((draft) => {
+        const lamp = draft.lamps.find((candidate) => candidate.id === id);
+        if (lamp) Object.assign(lamp, LAMP_PRESETS[preset]);
+      });
     } else if (data.addFluid) addFluidOf(data.addFluid as FluidKind).catch(console.error);
     else if (data.fluidFold) {
       if (fluidOpen.has(data.fluidFold)) fluidOpen.delete(data.fluidFold);
@@ -823,7 +930,23 @@ function wireGM() {
     else if (data.natural) change(() => (effectById(data.natural!)!.color = null));
     else if (button.id === "own") change((draft) => draft.looks.push({ ...structuredClone(draft.looks[0]), zone: zoneId }), true, true);
     else if (button.id === "follow") change((draft) => (draft.looks = draft.looks.filter((look) => look.zone !== zoneId)), true, true);
-    else if (data.moment) change((draft) => (ownLookOf(draft).time.hour = MOMENT_HOURS[data.moment as keyof typeof MOMENT_HOURS]), true, true);
+    else if (data.moment)
+      change(
+        (draft) => {
+          const time = ownLookOf(draft).time;
+          time.hour = MOMENT_HOURS[data.moment as keyof typeof MOMENT_HOURS];
+          if (time.pace) time.since = Date.now();
+        },
+        true,
+        true,
+      );
+    else if (data.pace)
+      change((draft) => {
+        const time = ownLookOf(draft).time;
+        settleHour(time, Date.now());
+        time.pace = Number(data.pace);
+        time.since = time.pace ? Date.now() : 0;
+      });
   });
 
   app.addEventListener("input", (event) => {
@@ -836,6 +959,7 @@ function wireGM() {
       const natural = app.querySelector<HTMLButtonElement>(`[data-natural="${CSS.escape(input.dataset.color)}"]`);
       if (natural) natural.disabled = false;
     }
+    else if (input.dataset.lampColor) change(() => (state.lamps.find((lamp) => lamp.id === input.dataset.lampColor)!.color = input.value.toLowerCase()), false);
     else if (input.dataset.fluidColor) {
       changeFluids(() => (fluidById(input.dataset.fluidColor!)!.color = input.value.toLowerCase()), false);
       input.classList.remove("natural");
@@ -960,8 +1084,21 @@ async function loadScene() {
     return;
   }
   [state, zones, limits, fluids] = await Promise.all([readState(), readZones().then((data) => data.zones), readLimits(), readFluids()]);
+  itemNames = new Map((await OBR.scene.items.getItems()).map((item) => [item.id, item.name]));
   renderGM();
 }
+
+/** L'heure avance seule : le panneau suit, sans redessiner (on peut être en train de glisser). */
+setInterval(() => {
+  if (tab !== "time" || holding || !state) return;
+  const look = state.looks.find((candidate) => candidate.zone === zoneId);
+  if (!look?.time.enabled || !look.time.pace) return;
+  const hour = hourNow(look.time, Date.now());
+  const shown = app.querySelector<HTMLElement>('[data-value="hour"]');
+  const slider = app.querySelector<HTMLInputElement>('[data-range="hour"]');
+  if (shown) shown.textContent = hourText(hour);
+  if (slider) slider.value = String(hour);
+}, 1000);
 
 OBR.onReady(async () => {
   document.documentElement.lang = currentLanguage();
@@ -984,6 +1121,13 @@ OBR.onReady(async () => {
   onZonesChange((data) => {
     zones = data.zones;
     if (!holding && state) renderGM();
+  });
+  // Noms des porteurs de lumière : seulement si l'un d'eux change (pas à chaque déplacement).
+  OBR.scene.items.onChange((items) => {
+    const next = new Map(items.map((item) => [item.id, item.name]));
+    const relevant = state?.lamps.some((lamp) => next.get(lamp.item) !== itemNames.get(lamp.item));
+    itemNames = next;
+    if (relevant && !holding && tab === "time") renderGM();
   });
   onFluidsChange((data) => {
     // Son propre écho, ou un curseur tenu : rien à redessiner.
