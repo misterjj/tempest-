@@ -177,3 +177,49 @@ export function startFrame(id: string, origin: Rect, color: string) {
     },
   };
 }
+
+/**
+ * Déplacement d'une fenêtre par sa barre de titre : un cadre suit la souris, puis la page de fond
+ * rouvre la fenêtre à sa nouvelle place (voir window/floating.ts). `send` porte les messages de
+ * déplacement vers la page de fond.
+ */
+export function wireWindowMove(
+  bar: HTMLElement,
+  { send, frameId, width, color }: { send: (message: object) => Promise<unknown>; frameId: string; width: number; color: string },
+) {
+  const params = new URLSearchParams(location.search);
+  let dragId: string | undefined;
+  let frame: ReturnType<typeof startFrame> | undefined;
+  let heartbeat: ReturnType<typeof setInterval> | undefined;
+  const stop = () => {
+    clearInterval(heartbeat);
+    const id = dragId;
+    dragId = undefined;
+    void frame?.remove();
+    frame = undefined;
+    return id;
+  };
+  trackPointer(bar, {
+    onMove(dx, dy) {
+      if (!dragId) {
+        if (Math.abs(dx) + Math.abs(dy) < 3) return;
+        const id = (dragId = crypto.randomUUID());
+        send({ type: "drag-start", dragId: id });
+        heartbeat = setInterval(() => send({ type: "drag-alive", dragId: id }), DRAG_HEARTBEAT_MS);
+        frame = startFrame(frameId, { left: Number(params.get("left")) || 0, top: Number(params.get("top")) || 0, width, height: window.innerHeight }, color);
+      }
+      frame?.move(dx, dy);
+    },
+    onEnd(dx, dy) {
+      const id = stop();
+      if (!id) return;
+      const message = { type: "move", dragId: id, dx, dy, height: window.innerHeight };
+      // Sans ce message la fenêtre ne bouge pas : une nouvelle tentative vaut le coup.
+      send(message).catch(() => send(message));
+    },
+    onCancel() {
+      const id = stop();
+      if (id) send({ type: "drag-cancel", dragId: id });
+    },
+  });
+}

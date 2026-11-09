@@ -4,10 +4,12 @@
 
 import OBR, { buildCurve, buildShape, type Item, type KeyFilter } from "@owlbear-rodeo/sdk";
 import { t } from "../i18n";
-import { readLimits, readZones, updateZones, ZonesTooLargeError } from "../scene-state";
+import { onZonesChange, readLimits, readZones, updateZones, ZonesTooLargeError } from "../scene-state";
 import { PLUGIN_ID } from "../state";
-import { TooManyZonesError, ZoneFullError, addShape, addZone, newZone, type Shape } from "../zones";
-import { DRAG_TIMEOUT_MS, clampPosition } from "../window/move";
+import { TooManyZonesError, ZoneFullError, addShape, addZone, newZone, zoneCost, type Shape } from "../zones";
+import { createVertexMode } from "./vertex-editor";
+import { flash, flashInto } from "./flash";
+import { floatingWindow, type MoveMessage } from "../window/floating";
 import {
   DEFAULT_TOOL_SETTINGS,
   PAINT_MODES,
@@ -39,10 +41,7 @@ export type ToolMessage =
   | { type: "clear"; zone: string }
   /** De la page de fond vers la palette : nombre de gestes à annuler et à rétablir. */
   | { type: "history"; undo: number; redo: number }
-  | { type: "drag-start"; dragId: string }
-  | { type: "drag-alive"; dragId: string }
-  | { type: "drag-cancel"; dragId: string }
-  | { type: "move"; dragId: string; dx: number; dy: number; height: number };
+  | MoveMessage;
 
 const send = (message: ToolMessage) => OBR.broadcast.sendMessage(TOOL_CHANNEL, message, { destination: "LOCAL" });
 const modeId = (mode: PaintMode) => `${TOOL_ID}/${mode}`;
@@ -73,7 +72,9 @@ function warn(error: unknown, limits?: { shapes: number; zones: number }) {
           ? t("tool.tooLarge")
           : t("tool.saveError");
   if (!known) console.error("[Tempest!] forme non enregistrée", error);
-  OBR.notification.show(text, "WARNING");
+  // Une limite atteinte en peignant : un message bref suffit. Un échec d'enregistrement reste une alerte.
+  if (error instanceof ZoneFullError || error instanceof TooManyZonesError) flash(text, "warning");
+  else OBR.notification.show(text, known ? "WARNING" : "ERROR");
 }
 
 // --- Annuler et rétablir ----------------------------------------------------------------------
@@ -178,6 +179,55 @@ async function clear(zone: string) {
   }).catch((error) => warn(error));
   if (step) remember(step);
 }
+
+// --- Mode Sommets : modifier les polygones de la zone choisie ------------------------------------
+
+/** Sommets au plus d'un polygone de zone (chacun compte dans la limite de formes de la salle). */
+const MAX_POLYGON_POINTS = 64;
+
+const zonePolygons = {
+  /** Polygones de la zone choisie ; sans zone choisie, ceux de toutes les zones. Clé : zone / rang. */
+  async list() {
+    const [data, settings] = await Promise.all([readZones(), toolSettings()]);
+    const chosen = data.zones.some((zone) => zone.id === settings.zone) ? data.zones.filter((zone) => zone.id === settings.zone) : data.zones;
+    return chosen.flatMap((zone) =>
+      zone.shapes.flatMap((shape, i) =>
+        shape.t === "g" ? [{ key: `${zone.id}/${i}`, points: shape.p, color: shape.e ? "#ffffff" : zone.color, max: MAX_POLYGON_POINTS }] : [],
+      ),
+    );
+  },
+  async save(key: string, points: number[]) {
+    const [id, rank] = key.split("/");
+    const limits = await readLimits();
+    let step: Step | undefined;
+    try {
+      await updateZones((data) => {
+        const zone = data.zones.find((candidate) => candidate.id === id);
+        const shape = zone?.shapes[Number(rank)];
+        if (!zone || shape?.t !== "g") return;
+        const before = copy(zone.shapes);
+        shape.p = points;
+        if (zoneCost(zone) > limits.shapes) throw new ZoneFullError();
+        step = { zone: zone.id, before, after: copy(zone.shapes) };
+      });
+      if (step) remember(step);
+    } catch (error) {
+      warn(error, limits);
+    }
+  },
+  undo: () => shortcut("undo"),
+  redo: () => shortcut("redo"),
+  watch(callback: () => void) {
+    const stops = [
+      onZonesChange(callback),
+      // Autre zone choisie dans la palette : ses polygones à elle.
+      OBR.broadcast.onMessage(TOOL_CHANNEL, ({ data }) => {
+        if ((data as ToolMessage).type === "selection") callback();
+      }),
+    ];
+    return () => stops.forEach((stop) => stop());
+  },
+};
 
 // --- Tracé en direct -------------------------------------------------------------------------
 
@@ -399,81 +449,33 @@ async function polygonClick(point: Point, altKey: boolean) {
   }
 }
 
-// --- Palette : ouverture et déplacement --------------------------------------------------------
+// --- Palette : fenêtre flottante -----------------------------------------------------------------
 
-const POSITION_KEY = "tempest/palette";
-let palette = { left: 72, top: 72, height: 520 };
-
-try {
-  const saved = JSON.parse(localStorage.getItem(POSITION_KEY) ?? "null");
-  if (saved && Number.isFinite(saved.left) && Number.isFinite(saved.top)) palette = { ...palette, left: saved.left, top: saved.top };
-} catch {
-  // Position perdue : la palette s'ouvre à sa place par défaut.
-}
-
-async function openPalette() {
-  const [width, height] = await Promise.all([OBR.viewport.getWidth(), OBR.viewport.getHeight()]);
-  const placed = clampPosition({ left: palette.left, top: palette.top, width: PALETTE_WIDTH, height: Math.min(palette.height, height - 16) }, width, height);
-  palette = { ...palette, ...placed };
-  await OBR.popover.open({
+/** Créée par setupTool : la palette importe ce fichier, elle ne doit pas en créer une. */
+let palette: ReturnType<typeof floatingWindow>;
+const createPalette = () =>
+  floatingWindow({
     id: PALETTE_ID,
-    url: `/palette.html?left=${placed.left}&top=${placed.top}`,
+    url: "/palette.html",
     width: PALETTE_WIDTH,
-    height: Math.min(palette.height, height - 16),
-    anchorReference: "POSITION",
-    anchorPosition: placed,
-    anchorOrigin: { horizontal: "LEFT", vertical: "TOP" },
-    transformOrigin: { horizontal: "LEFT", vertical: "TOP" },
-    disableClickAway: true,
-    marginThreshold: 8,
+    frameId: PALETTE_FRAME_ID,
+    storageKey: "tempest/palette",
+    // La palette vient de s'ouvrir : elle doit savoir ce que « Rétablir » peut remettre.
+    onOpened: () => setTimeout(reportHistory, 400),
   });
-  // La palette vient de s'ouvrir : elle doit savoir ce que « Rétablir » peut remettre.
-  setTimeout(reportHistory, 400);
-}
+const openPalette = () => palette.open();
 
-let activeDrag: string | undefined;
-let lastDragSignal = 0;
-
-async function removeFrame() {
-  await OBR.scene.local.deleteItems([PALETTE_FRAME_ID]).catch(() => {});
-}
-
-/** Une action à la fois : la palette ne doit pas être rouverte deux fois en même temps. */
+/** Une action à la fois. */
 let queue = Promise.resolve();
 const enqueue = (work: () => Promise<void>) => {
   queue = queue.then(work).catch((error) => console.error("[Tempest!]", error));
 };
 
 function handleMessage(message: ToolMessage) {
-  // Traité dès la réception : la file peut être occupée par l'action précédente.
-  if (message.type === "drag-start" || message.type === "drag-alive") {
-    activeDrag = message.dragId;
-    lastDragSignal = Date.now();
-    return;
-  }
+  if (palette.handle(message)) return;
   if (message.type === "undo") enqueue(undo);
   else if (message.type === "redo") enqueue(redo);
   else if (message.type === "clear") enqueue(() => clear(message.zone));
-  else if (message.type === "drag-cancel") {
-    if (activeDrag === message.dragId) activeDrag = undefined;
-    enqueue(removeFrame);
-  } else if (message.type === "move") {
-    if (activeDrag === message.dragId) activeDrag = undefined;
-    enqueue(async () => {
-      // Le cadre part d'abord : si la réouverture échoue, il ne reste pas à l'écran.
-      const removed = removeFrame();
-      palette = { left: palette.left + message.dx, top: palette.top + message.dy, height: message.height };
-      // Owlbear ne déplace pas une fenêtre ouverte : on la rouvre ailleurs.
-      await OBR.popover.close(PALETTE_ID);
-      await openPalette();
-      await removed;
-      try {
-        localStorage.setItem(POSITION_KEY, JSON.stringify({ left: palette.left, top: palette.top }));
-      } catch {
-        // Sans stockage, la position ne dure que le temps de la session.
-      }
-    });
-  }
 }
 
 // --- Outil, modes et action « Peindre / Effacer » ------------------------------------------------
@@ -513,6 +515,8 @@ function shortcut(action: "undo" | "redo") {
 }
 
 export function setupTool() {
+  palette = createPalette();
+  flashInto(palette);
   const gmOnly = { roles: ["GM" as const] };
   const whenActive = { activeTools: [TOOL_ID], roles: ["GM" as const] };
   OBR.tool.create({
@@ -612,23 +616,24 @@ export function setupTool() {
     });
   }
 
+  createVertexMode({
+    toolId: TOOL_ID,
+    modeId: `${TOOL_ID}/sommets`,
+    icon: "/tool/sommets.svg",
+    label: t("vertices.mode"),
+    filter: whenActive,
+    source: zonePolygons,
+    onActivate: () => enqueue(openPalette),
+  });
+
   // La palette reste ouverte tant que l'outil est actif.
   OBR.tool.onToolChange((id) => {
     if (id !== TOOL_ID) {
       stopDrawing();
       setAlt(false);
-      OBR.popover.close(PALETTE_ID).catch(() => {});
+      palette.close();
     }
   });
 
   OBR.broadcast.onMessage(TOOL_CHANNEL, ({ data }) => handleMessage(data as ToolMessage));
-  // Palette disparue en plein déplacement : le cadre ne reste pas à l'écran.
-  setInterval(() => {
-    if (activeDrag && Date.now() - lastDragSignal > DRAG_TIMEOUT_MS) {
-      activeDrag = undefined;
-      enqueue(removeFrame);
-    }
-  }, 500);
-  // Cadre laissé par une version précédente de cette page.
-  OBR.scene.isReady().then((ready) => (ready ? removeFrame() : undefined)).catch(() => {});
 }

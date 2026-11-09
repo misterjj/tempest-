@@ -695,7 +695,7 @@ function fluidCard(fluid: Fluid) {
         ${range(id("opacity"), fluid.opacity, 0, 1, 0.01, t("fluid.opacity"), percent(fluid.opacity))}
         <p class="hint flush">${t("fluid.stats", { strokes: fluid.strokes.length, rocks: fluid.rocks.length, segments: fluidCost(fluid), max: MAX_SEGMENTS })}${
           fluid.sources.length ? t("fluid.statsSources", { sources: fluid.sources.length }) : ""
-        }</p>
+        }${fluid.masks.length ? t("fluid.statsMasks", { masks: fluid.masks.length }) : ""}</p>
       </div>
     </div>`;
 }

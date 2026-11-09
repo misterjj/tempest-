@@ -7,17 +7,18 @@ import { currentLanguage, t } from "../i18n";
 import type { Limits } from "../limits";
 import "../panel/panel.css";
 import { deleteZone, onLimitsChange, onZonesChange, readLimits, readZones, updateZones } from "../scene-state";
-import { DRAG_HEARTBEAT_MS, startFrame, trackPointer } from "../window/move";
+import { wireWindowMove } from "../window/move";
 import { MAX_FEATHER, TooManyZonesError, addZone, newZone, zoneCost, type Zone, type ZonesData } from "../zones";
 import { keyNames } from "../keys";
 import { BRUSH_SIZES, PAINT_MODES, type PaintMode, type ToolSettings } from "./drawing";
 import { PALETTE_FRAME_ID, PALETTE_ID, PALETTE_WIDTH, TOOL_CHANNEL, TOOL_ID, setToolSettings, toolSettings, type ToolMessage } from "./tool";
 import "./palette.css";
+import { flashHtml, helpHtml, watchFlash } from "../hint/help";
+import { modeHint } from "../hint/messages";
 
 const app = document.querySelector<HTMLDivElement>("#app")!;
 /** Partie redessinée ; la barre de titre, elle, reste en place pour pouvoir être glissée. */
 let content: HTMLElement;
-const params = new URLSearchParams(location.search);
 const escape = (text: string) => text.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
 const send = (message: ToolMessage) => OBR.broadcast.sendMessage(TOOL_CHANNEL, message, { destination: "LOCAL" });
 
@@ -26,7 +27,10 @@ let limits: Limits;
 let settings: ToolSettings;
 let history = { undo: 0, redo: 0 };
 /** Forme choisie dans la barre d'outils : la taille ne sert qu'au pinceau. */
-let mode: PaintMode = "brush";
+let mode: PaintMode | "vertices" = "brush";
+/** Mode actif, pour l'aide */
+let modeId: string | undefined;
+let currentFlash: () => ReturnType<ReturnType<typeof watchFlash>> = () => null;
 /** Suppression en attente de confirmation : un second clic la valide. */
 let confirmDelete = false;
 /** Zone tout juste créée : son nom s'ouvre à la saisie. */
@@ -99,8 +103,11 @@ function shell() {
     </header>
     <div id="content"></div>`;
   content = app.querySelector<HTMLElement>("#content")!;
-  app.querySelector<HTMLButtonElement>("#close")!.onclick = () => OBR.popover.close(PALETTE_ID);
-  wireMove(app.querySelector<HTMLElement>("#drag")!);
+  app.querySelector<HTMLButtonElement>("#close")!.onclick = async () => {
+    await send({ type: "closed" });
+    await OBR.popover.close(PALETTE_ID);
+  };
+  wireWindowMove(app.querySelector<HTMLElement>("#drag")!, { send: (message) => send(message as ToolMessage), frameId: PALETTE_FRAME_ID, width: PALETTE_WIDTH, color: "#4f9dff" });
 }
 
 function render() {
@@ -123,7 +130,8 @@ function render() {
         </label>`
             : ""
         }
-
+        ${flashHtml(currentFlash())}
+        ${helpHtml(modeHint(modeId))}
       </section>
       <section class="block">
         <div class="block-head">
@@ -244,60 +252,22 @@ function wire() {
   };
 }
 
-/** Déplacement par la barre de titre : un cadre suit la souris, la page de fond rouvre la palette. */
-function wireMove(bar: HTMLElement) {
-  let dragId: string | undefined;
-  let frame: ReturnType<typeof startFrame> | undefined;
-  let heartbeat: ReturnType<typeof setInterval> | undefined;
-  const stop = () => {
-    clearInterval(heartbeat);
-    const id = dragId;
-    dragId = undefined;
-    void frame?.remove();
-    frame = undefined;
-    return id;
-  };
-  trackPointer(bar, {
-    onMove(dx, dy) {
-      if (!dragId) {
-        if (Math.abs(dx) + Math.abs(dy) < 3) return;
-        const id = (dragId = crypto.randomUUID());
-        send({ type: "drag-start", dragId: id });
-        heartbeat = setInterval(() => send({ type: "drag-alive", dragId: id }), DRAG_HEARTBEAT_MS);
-        frame = startFrame(
-          PALETTE_FRAME_ID,
-          { left: Number(params.get("left")) || 0, top: Number(params.get("top")) || 0, width: PALETTE_WIDTH, height: window.innerHeight },
-          "#4f9dff",
-        );
-      }
-      frame?.move(dx, dy);
-    },
-    onEnd(dx, dy) {
-      const id = stop();
-      if (!id) return;
-      const message: ToolMessage = { type: "move", dragId: id, dx, dy, height: window.innerHeight };
-      // Sans ce message la palette ne bouge pas : une nouvelle tentative vaut le coup.
-      send(message).catch(() => send(message));
-    },
-    onCancel() {
-      const id = stop();
-      if (id) send({ type: "drag-cancel", dragId: id });
-    },
-  });
-}
-
 OBR.onReady(async () => {
   document.documentElement.lang = currentLanguage();
   const theme = await OBR.theme.getTheme();
   document.documentElement.dataset.theme = theme.mode === "LIGHT" ? "light" : "dark";
   shell();
   [zones, limits, settings] = await Promise.all([readZones(), readLimits(), toolSettings()]);
-  const readMode = (id: string | undefined) => PAINT_MODES.find((candidate) => id === `${TOOL_ID}/${candidate}`) ?? mode;
+  const readMode = (id: string | undefined) => {
+    modeId = id;
+    return id === `${TOOL_ID}/sommets` ? "vertices" : (PAINT_MODES.find((candidate) => id === `${TOOL_ID}/${candidate}`) ?? mode);
+  };
   mode = readMode(await OBR.tool.getActiveToolMode());
   OBR.tool.onToolModeChange((id) => {
     mode = readMode(id);
     refresh();
   });
+  currentFlash = watchFlash(() => refresh());
   // Zone choisie supprimée entre-temps : plus rien de choisi.
   if (settings.zone && !zones.zones.some((zone) => zone.id === settings.zone)) await select(null);
   else render();

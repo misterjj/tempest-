@@ -1,6 +1,6 @@
 // Fluides : coulées de lave et cours d'eau tracés par le MJ. Une coulée est faite de traits de
-// pinceau, tracés dans le sens du courant (le premier point est l'amont), et de rochers que le
-// courant contourne. Stockés à part (clé FLUIDS_KEY) : ils ne changent que quand le MJ trace.
+// pinceau, tracés dans le sens du courant (le premier point est l'amont), et d'obstacles (rochers,
+// piliers, tracés en polygone) que le courant contourne. Stockés à part (clé FLUIDS_KEY) : ils ne changent que quand le MJ trace.
 // Ce fichier ne dépend pas d'Owlbear.
 
 import { simplifyStroke } from "./render/mask";
@@ -21,6 +21,14 @@ export const MAX_FLUIDS = 12;
 export const MAX_SEGMENTS = 80;
 export const MAX_ROCKS = 24;
 export const MAX_SOURCES = 16;
+/** Sommets d'un obstacle : chacun coûte un peu à chaque image, chez chaque joueur. */
+export const MAX_ROCK_POINTS = 16;
+/** Caches : polygones où la coulée n'est pas dessinée (sous un pont, derrière un mur). */
+export const MAX_MASKS = 24;
+/** Cache au pinceau : segments au plus par coulée (chacun se calcule à chaque image). */
+export const MAX_HIDE_SEGMENTS = 160;
+/** Taille du pinceau de cache, en cases (diamètre). */
+export const HIDE_BRUSH = { min: 0.1, max: 4, default: 0.5 };
 
 /** Largeur d'un trait, en cases (diamètre). */
 export const STROKE_WIDTHS = { min: 0.5, max: 12, default: 3 };
@@ -50,6 +58,13 @@ export const FLUID_SHAPES: Record<FluidKind, "flow" | "area" | "line"> = {
   shore: "line",
 };
 
+/** Coup de pinceau du cache : rayon, points à plat, et `e: 1` pour la gomme. */
+export interface HideStroke {
+  r: number;
+  p: number[];
+  e?: 1;
+}
+
 /** Trait de courant : rayon et points à plat [x0, y0, x1, y1, …], de l'amont vers l'aval. */
 export interface FluidStroke {
   r: number;
@@ -60,6 +75,12 @@ export interface Rock {
   x: number;
   y: number;
   r: number;
+  /**
+   * Contour d'un obstacle tracé en polygone, points à plat [x0, y0, x1, y1, …]. Sans contour,
+   * l'obstacle est un rond (rochers des premières versions). Avec, (x, y) est son centre et r le
+   * rayon du cercle qui le contient.
+   */
+  p?: number[];
 }
 
 export interface Fluid {
@@ -78,6 +99,16 @@ export interface Fluid {
   rocks: Rock[];
   /** Sources : jets, chutes d'eau et bouillons ponctuels, qui font rider et mousser l'eau autour */
   sources: Rock[];
+  /**
+   * Caches : polygones où la coulée passe dessous, sans être dessinée. Contrairement aux
+   * obstacles, ils ne changent ni le courant ni les rives : la coulée est seulement découpée.
+   */
+  masks: Rock[];
+  /**
+   * Cache au pinceau : coups de pinceau, dans l'ordre où ils ont été peints. Un coup marqué `e`
+   * (Alt enfoncé) efface le cache déjà peint dessous et rend la coulée visible.
+   */
+  hideStrokes: HideStroke[];
 }
 
 export interface FluidsData {
@@ -88,7 +119,7 @@ export interface FluidsData {
 export const emptyFluids = (): FluidsData => ({ v: FLUIDS_VERSION, fluids: [] });
 
 export function newFluid(kind: FluidKind, name: string, id: string = crypto.randomUUID()): Fluid {
-  return { id, name, kind, enabled: true, speed: 1, opacity: 1, color: null, options: { ...FLUID_OPTIONS[kind] }, strokes: [], rocks: [], sources: [] };
+  return { id, name, kind, enabled: true, speed: 1, opacity: 1, color: null, options: { ...FLUID_OPTIONS[kind] }, strokes: [], rocks: [], sources: [], masks: [], hideStrokes: [] };
 }
 
 /** Segments de rendu d'une coulée : un trait de n points en compte n - 1 (au moins 1). */
@@ -111,9 +142,133 @@ export function addStroke(fluid: Fluid, stroke: FluidStroke) {
   fluid.strokes.push(stroke);
 }
 
+// --- Obstacles en polygone ---------------------------------------------------------------------
+
+const pointsOf = (flat: number[]) => Array.from({ length: flat.length / 2 }, (_, i) => ({ x: flat[i * 2], y: flat[i * 2 + 1] }));
+
+/** Aire signée d'un polygone (positive ou négative selon le sens de tracé). */
+function signedArea(points: Point[]) {
+  let area = 0;
+  for (let i = 0; i < points.length; i++) {
+    const a = points[i];
+    const b = points[(i + 1) % points.length];
+    area += a.x * b.y - b.x * a.y;
+  }
+  return area / 2;
+}
+
+/** Aire d'un obstacle, rond ou polygone. */
+export const rockArea = (rock: Rock) => (rock.p ? Math.abs(signedArea(pointsOf(rock.p))) : Math.PI * rock.r * rock.r);
+
+/**
+ * Obstacle prêt à stocker, d'après les sommets cliqués ou un contour tracé à main levée : les
+ * sommets presque alignés sont retirés (méthode de Visvalingam) jusqu'à `MAX_ROCK_POINTS` au plus.
+ * `tolerance` : écart, en pixels, en dessous duquel un sommet ne compte pas. Null s'il ne reste
+ * pas de quoi faire une surface.
+ */
+export function polygonRock(input: Point[], tolerance: number): Rock | null {
+  const points: Point[] = [];
+  for (const point of input) {
+    const last = points[points.length - 1];
+    if (!last || Math.hypot(point.x - last.x, point.y - last.y) >= 1) points.push({ x: point.x, y: point.y });
+  }
+  while (points.length > 1 && Math.hypot(points[0].x - points[points.length - 1].x, points[0].y - points[points.length - 1].y) < 1) points.pop();
+  const triangle = (i: number) => {
+    const a = points[(i + points.length - 1) % points.length];
+    const b = points[i];
+    const c = points[(i + 1) % points.length];
+    return Math.abs((b.x - a.x) * (c.y - a.y) - (c.x - a.x) * (b.y - a.y)) / 2;
+  };
+  const minimum = tolerance * tolerance;
+  while (points.length > 3) {
+    let smallest = 0;
+    for (let i = 1; i < points.length; i++) if (triangle(i) < triangle(smallest)) smallest = i;
+    if (points.length <= MAX_ROCK_POINTS && triangle(smallest) >= minimum) break;
+    points.splice(smallest, 1);
+  }
+  if (points.length < 3) return null;
+  const area = signedArea(points);
+  // Épaisseur moyenne (deux fois l'aire sur le périmètre) : un polygone presque plat n'a pas de surface.
+  const perimeter = points.reduce((total, point, i) => total + Math.hypot(points[(i + 1) % points.length].x - point.x, points[(i + 1) % points.length].y - point.y), 0);
+  if ((2 * Math.abs(area)) / perimeter < tolerance) return null;
+  return outlineRock(points.flatMap((point) => [Math.round(point.x), Math.round(point.y)]));
+}
+
+/**
+ * Obstacle ou cache d'après son contour (points à plat, déjà arrondis) : centre de gravité de la
+ * surface, et rayon du cercle qui contient tous les sommets. À refaire après chaque modification.
+ */
+export function outlineRock(flat: number[]): Rock {
+  const points = pointsOf(flat);
+  const area = signedArea(points);
+  let cx = 0;
+  let cy = 0;
+  if (Math.abs(area) > 0.5) {
+    for (let i = 0; i < points.length; i++) {
+      const a = points[i];
+      const b = points[(i + 1) % points.length];
+      const cross = a.x * b.y - b.x * a.y;
+      cx += (a.x + b.x) * cross;
+      cy += (a.y + b.y) * cross;
+    }
+    cx /= 6 * area;
+    cy /= 6 * area;
+  } else {
+    // Contour aplati : la moyenne des sommets suffit.
+    cx = points.reduce((total, point) => total + point.x, 0) / points.length;
+    cy = points.reduce((total, point) => total + point.y, 0) / points.length;
+  }
+  const r = Math.max(...points.map((point) => Math.hypot(point.x - cx, point.y - cy)));
+  return { x: Math.round(cx), y: Math.round(cy), r: Math.ceil(r) + 1, p: [...flat] };
+}
+
+/** Le point est-il dans l'obstacle ? */
+export function insideRock(rock: Rock, point: Point) {
+  if (Math.hypot(point.x - rock.x, point.y - rock.y) > rock.r) return false;
+  if (!rock.p) return true;
+  const p = rock.p;
+  let inside = false;
+  for (let i = 0, j = p.length - 2; i < p.length; j = i, i += 2) {
+    const [xi, yi, xj, yj] = [p[i], p[i + 1], p[j], p[j + 1]];
+    if (yi > point.y !== yj > point.y && point.x < ((xj - xi) * (point.y - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
 export function addRock(fluid: Fluid, rock: Rock) {
   if (fluid.rocks.length >= MAX_ROCKS) throw new FluidFullError();
   fluid.rocks.push(rock);
+}
+
+/** Segments de rendu du cache au pinceau : un coup de n points en compte n - 1 (au moins 1). */
+export const hideCost = (fluid: Fluid) => fluid.hideStrokes.reduce((total, stroke) => total + Math.max(1, stroke.p.length / 2 - 1), 0);
+
+/** Coup de pinceau prêt à stocker : simplifié selon sa taille, arrondi au pixel. */
+export function hideStroke(points: Point[], radius: number, erase: boolean): HideStroke | null {
+  if (!points.length) return null;
+  // Simplification plus fine que pour un trait de courant : le cache suit un bord dessiné.
+  const fine = simplifyStroke(points, Math.max(1, radius * 0.1));
+  return { r: Math.max(1, Math.round(radius)), p: fine.flatMap((point) => [Math.round(point.x) || 0, Math.round(point.y) || 0]), ...(erase ? { e: 1 as const } : {}) };
+}
+
+export function addHideStroke(fluid: Fluid, stroke: HideStroke) {
+  if (hideCost(fluid) + Math.max(1, stroke.p.length / 2 - 1) > MAX_HIDE_SEGMENTS) throw new FluidFullError();
+  fluid.hideStrokes.push(stroke);
+}
+
+/** Coup de pinceau de cache sous le pointeur (le plus récent d'abord). */
+export function hideStrokeAt(data: FluidsData, point: Point): { fluid: Fluid; stroke: HideStroke } | null {
+  for (const fluid of data.fluids)
+    for (let i = fluid.hideStrokes.length - 1; i >= 0; i--) {
+      const stroke = fluid.hideStrokes[i];
+      if (nearestOnStroke(stroke, point).distance <= stroke.r) return { fluid, stroke };
+    }
+  return null;
+}
+
+export function addMask(fluid: Fluid, mask: Rock) {
+  if (fluid.masks.length >= MAX_MASKS) throw new FluidFullError();
+  fluid.masks.push(mask);
 }
 
 export function addSource(fluid: Fluid, source: Rock) {
@@ -177,7 +332,14 @@ export function strokeAt(data: FluidsData, point: Point, margin = 0): StrokeHit 
 
 export function rockAt(data: FluidsData, point: Point): { fluid: Fluid; rock: Rock } | null {
   for (const fluid of data.fluids) {
-    for (const rock of fluid.rocks) if (Math.hypot(point.x - rock.x, point.y - rock.y) <= rock.r) return { fluid, rock };
+    for (const rock of fluid.rocks) if (insideRock(rock, point)) return { fluid, rock };
+  }
+  return null;
+}
+
+export function maskAt(data: FluidsData, point: Point): { fluid: Fluid; mask: Rock } | null {
+  for (const fluid of data.fluids) {
+    for (const mask of fluid.masks) if (insideRock(mask, point)) return { fluid, mask };
   }
   return null;
 }
@@ -243,7 +405,24 @@ export function parseFluids(value: unknown): FluidsData {
     }
     for (const rock of Array.isArray(raw.rocks) ? raw.rocks : []) {
       if (fluid.rocks.length >= MAX_ROCKS) break;
-      if (isObject(rock) && isNumber(rock.x) && isNumber(rock.y) && isNumber(rock.r) && rock.r > 0) fluid.rocks.push({ x: rock.x, y: rock.y, r: rock.r });
+      if (!isObject(rock) || !isNumber(rock.x) || !isNumber(rock.y) || !isNumber(rock.r) || rock.r <= 0) continue;
+      const outline = rock.p;
+      if (outline === undefined) fluid.rocks.push({ x: rock.x, y: rock.y, r: rock.r });
+      else if (Array.isArray(outline) && outline.length >= 6 && outline.length <= MAX_ROCK_POINTS * 2 && !(outline.length % 2) && outline.every(isNumber))
+        fluid.rocks.push({ x: rock.x, y: rock.y, r: rock.r, p: outline as number[] });
+    }
+    for (const mask of Array.isArray(raw.masks) ? raw.masks : []) {
+      if (fluid.masks.length >= MAX_MASKS) break;
+      const outline = isObject(mask) ? mask.p : undefined;
+      if (!isObject(mask) || !isNumber(mask.x) || !isNumber(mask.y) || !isNumber(mask.r) || mask.r <= 0) continue;
+      if (Array.isArray(outline) && outline.length >= 6 && outline.length <= MAX_ROCK_POINTS * 2 && !(outline.length % 2) && outline.every(isNumber))
+        fluid.masks.push({ x: mask.x, y: mask.y, r: mask.r, p: outline as number[] });
+    }
+    for (const stroke of Array.isArray(raw.hideStrokes) ? raw.hideStrokes : []) {
+      if (!isObject(stroke) || !isNumber(stroke.r) || stroke.r <= 0 || !Array.isArray(stroke.p) || stroke.p.length < 2 || stroke.p.length % 2 || !stroke.p.every(isNumber)) continue;
+      const parsed: HideStroke = { r: stroke.r, p: stroke.p as number[], ...(stroke.e === 1 ? { e: 1 as const } : {}) };
+      if (hideCost(fluid) + Math.max(1, parsed.p.length / 2 - 1) > MAX_HIDE_SEGMENTS) break;
+      fluid.hideStrokes.push(parsed);
     }
     data.fluids.push(fluid);
   }

@@ -8,7 +8,9 @@ import { FLUID_KINDS, newFluid, type FluidKind } from "../src/fluids";
 const flow = (kind: FluidKind) => ({
   ...newFluid(kind, "", kind),
   strokes: [{ r: 60, p: [0, 0, 300, 50, 600, 0] }, { r: 30, p: [300, 50, 400, 200] }],
-  rocks: [{ x: 300, y: 40, r: 25 }],
+  rocks: [{ x: 300, y: 40, r: 25 }, { x: 420, y: 60, r: 50, p: [380, 30, 460, 40, 440, 100, 390, 90] }],
+  masks: [{ x: 250, y: 30, r: 120, p: [200, -80, 300, -80, 300, 140, 200, 140] }],
+  hideStrokes: [{ r: 20, p: [100, 0, 200, 40] }, { r: 8, p: [150, 20], e: 1 as const }],
 });
 
 /** Uniforms fournis par Owlbear, avec leur type : les redéclarer autrement casse le shader. */

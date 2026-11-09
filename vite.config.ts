@@ -7,7 +7,7 @@ export default defineConfig({
   server: { cors: true, port: 5175, strictPort: true },
   build: {
     rollupOptions: {
-      input: { background: resolve("background.html"), panel: resolve("panel.html"), palette: resolve("palette.html") },
+      input: { background: resolve("background.html"), panel: resolve("panel.html"), palette: resolve("palette.html"), fluidPalette: resolve("fluid-palette.html") },
     },
   },
 });

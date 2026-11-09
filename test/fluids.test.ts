@@ -12,6 +12,10 @@ import {
   newFluid,
   orientStroke,
   parseFluids,
+  hideStrokeAt,
+  maskAt,
+  polygonRock,
+  MAX_ROCK_POINTS,
   reverseStroke,
   rockAt,
   strokeAt,
@@ -50,6 +54,74 @@ describe("coulées", () => {
     expect(rockAt(data, { x: 205, y: 15 })?.rock.r).toBe(20);
   });
 
+  it("fait un obstacle d'un polygone : sommets alignés retirés, centre et rayon", () => {
+    // Un carré de 100 tracé à main levée, avec des points en trop sur ses côtés.
+    const side = (ax: number, ay: number, bx: number, by: number) => Array.from({ length: 10 }, (_, i) => ({ x: ax + ((bx - ax) * i) / 10, y: ay + ((by - ay) * i) / 10 }));
+    const rock = polygonRock([...side(0, 0, 100, 0), ...side(100, 0, 100, 100), ...side(100, 100, 0, 100), ...side(0, 100, 0, 0), { x: 0, y: 0 }], 5)!;
+    expect(rock.p).toEqual([0, 0, 100, 0, 100, 100, 0, 100]);
+    expect([rock.x, rock.y]).toEqual([50, 50]);
+    expect(rock.r).toBeGreaterThanOrEqual(Math.hypot(50, 50));
+    // Un cercle de 200 points garde au plus MAX_ROCK_POINTS sommets.
+    const circle = polygonRock(Array.from({ length: 200 }, (_, i) => ({ x: Math.cos(i / 31.8) * 100, y: Math.sin(i / 31.8) * 100 })), 1)!;
+    expect(circle.p!.length / 2).toBeLessThanOrEqual(MAX_ROCK_POINTS);
+    // Trois points presque alignés : pas de surface.
+    expect(polygonRock([{ x: 0, y: 0 }, { x: 100, y: 1 }, { x: 200, y: 0 }], 5)).toBeNull();
+    expect(polygonRock([{ x: 0, y: 0 }, { x: 100, y: 0 }], 5)).toBeNull();
+  });
+
+  it("repère un obstacle en polygone d'après son contour, pas son cercle", () => {
+    const data = emptyFluids();
+    const fluid = river();
+    // Un L : le coin vide en haut à droite est hors de l'obstacle.
+    fluid.rocks = [{ x: 40, y: 60, r: 90, p: [0, 0, 40, 0, 40, 80, 120, 80, 120, 120, 0, 120] }];
+    data.fluids.push(fluid);
+    expect(rockAt(data, { x: 20, y: 20 })).not.toBeNull();
+    expect(rockAt(data, { x: 100, y: 100 })).not.toBeNull();
+    expect(rockAt(data, { x: 100, y: 20 })).toBeNull();
+  });
+
+  it("dessine un obstacle en polygone dans la coulée et pour le MJ", () => {
+    const fluid = river();
+    fluid.rocks.push({ x: 300, y: 50, r: 40, p: [270, 20, 330, 30, 320, 80] });
+    expect(fluidSksl(fluid, 150)).toContain("float rock_poly1(vec2 p)");
+    expect(arrowsSksl([fluid], null)).toContain("float obstacle_poly1(vec2 p)");
+  });
+
+  it("découpe la coulée sous un cache, sans toucher au courant", () => {
+    const fluid = river();
+    const plain = fluidSksl(fluid, 150)!;
+    fluid.masks.push({ x: 250, y: 0, r: 120, p: [200, -100, 300, -100, 300, 100, 200, 100] });
+    const hidden = fluidSksl(fluid, 150)!;
+    // Le corps de la coulée est inchangé ; seul un nouveau main le découpe.
+    expect(hidden).toContain(plain.replace("half4 main(float2 coord) {", "half4 fluidBody(float2 coord) {"));
+    expect(hidden).toContain("float hide_poly0(vec2 p)");
+    expect(hidden).toContain("return fluidBody(coord) * half(keep);");
+    expect(arrowsSksl([fluid], null)).toContain("float cache0_poly0(vec2 p)");
+    const data = emptyFluids();
+    data.fluids.push(fluid);
+    expect(maskAt(data, { x: 250, y: 50 })?.fluid.id).toBe("f1");
+    expect(maskAt(data, { x: 350, y: 50 })).toBeNull();
+  });
+
+  it("cache au pinceau : les coups dans l'ordre, la gomme rend visible", () => {
+    const fluid = river();
+    fluid.hideStrokes.push({ r: 20, p: [100, 0, 200, 0] }, { r: 10, p: [150, 0], e: 1 });
+    const sksl = fluidSksl(fluid, 150)!;
+    expect(sksl).toContain("float hideCover(vec2 p)");
+    expect(sksl).toContain("d = min(d, hideSegment(p, vec2(100.0, 0.0), vec2(200.0, 0.0)));");
+    // Le coup de gomme vient après, et réduit la part cachée.
+    expect(sksl.indexOf("h = max(h, c);")).toBeLessThan(sksl.indexOf("h *= 1.0 - c;"));
+    expect(arrowsSksl([fluid], null)).toContain("float cache0Cover(vec2 p)");
+    const data = emptyFluids();
+    data.fluids.push(fluid);
+    // Le plus récent d'abord : la gomme, au centre.
+    expect(hideStrokeAt(data, { x: 150, y: 5 })?.stroke.e).toBe(1);
+    expect(hideStrokeAt(data, { x: 110, y: 5 })?.stroke.r).toBe(20);
+    expect(hideStrokeAt(data, { x: 110, y: 40 })).toBeNull();
+    // Relu tel quel, gomme comprise.
+    expect(parseFluids(JSON.parse(JSON.stringify(data))).fluids[0].hideStrokes).toEqual(fluid.hideStrokes);
+  });
+
   it("refuse un trait ou un rocher de trop", () => {
     const fluid = newFluid("lava", "Lave", "f2");
     fluid.strokes.push({ r: 5, p: Array.from({ length: (MAX_SEGMENTS + 1) * 2 }, (_, i) => i) });
@@ -65,14 +137,19 @@ describe("coulées", () => {
       fluids: [
         { ...river(), speed: 99, options: { foam: 2, autre: 1 }, color: "#ABCDEF" },
         { id: "x", kind: "inconnu" },
+        { ...river(), id: "f4", rocks: [{ x: 0, y: 0, r: 5, p: [0, 0, 1, 1] }, { x: 0, y: 0, r: 5, p: [0, 0, 10, 0, 0, 10] }, { x: 0, y: 0, r: 5, p: "x" }], masks: [{ x: 0, y: 0, r: 5 }, { x: 0, y: 0, r: 5, p: [0, 0, 10, 0, 0, 10] }] },
         { ...river(), id: "f3", strokes: [{ r: -1, p: [0, 0] }, { r: 5, p: [1, 2, 3] }, { r: 5, p: [1, 2] }] },
       ],
     });
-    expect(data.fluids.map((fluid) => fluid.id)).toEqual(["f1", "f3"]);
+    expect(data.fluids.map((fluid) => fluid.id)).toEqual(["f1", "f4", "f3"]);
+    expect(data.fluids[1].rocks).toEqual([{ x: 0, y: 0, r: 5, p: [0, 0, 10, 0, 0, 10] }]);
+    // Un cache est toujours un polygone.
+    expect(data.fluids[1].masks).toEqual([{ x: 0, y: 0, r: 5, p: [0, 0, 10, 0, 0, 10] }]);
+    expect(data.fluids[0].masks).toEqual([]);
     expect(data.fluids[0].speed).toBe(3);
     expect(data.fluids[0].options).toEqual({ foam: 1, clarity: 0.4 });
     expect(data.fluids[0].color).toBe("#abcdef");
-    expect(data.fluids[1].strokes).toEqual([{ r: 5, p: [1, 2] }]);
+    expect(data.fluids[2].strokes).toEqual([{ r: 5, p: [1, 2] }]);
   });
 });
 

@@ -50,7 +50,7 @@ function bounds(stroke: Stroke) {
  * Distance signée à un polygone (méthode d'Inigo Quilez), déroulée arête par arête : SkSL
  * n'accepte pas de tableau de points, chaque polygone a donc sa propre fonction.
  */
-function polygonFunction(points: number[], index: number, name: string) {
+export function polygonFunction(points: number[], index: number, name: string) {
   const vertices: [number, number][] = [];
   for (let i = 0; i < points.length; i += 2) vertices.push([points[i], points[i + 1]]);
   const v = (i: number) => `vec2(${f(vertices[i][0])}, ${f(vertices[i][1])})`;

@@ -16,9 +16,9 @@
 // - octaves du bruit selon la qualité ; traits simplifiés à l'enregistrement.
 // Ce fichier ne dépend pas d'Owlbear.
 
-import { FLUID_SHAPES, type Fluid, type FluidKind, type FluidStroke, type Rock } from "../fluids";
+import { FLUID_SHAPES, rockArea, type Fluid, type FluidKind, type FluidStroke, type Rock } from "../fluids";
 import { HEADER } from "./shaders";
-import { MASK_HELPERS } from "./mask";
+import { MASK_HELPERS, polygonFunction } from "./mask";
 import { PLUGIN_ID } from "../state";
 import { RAIN_LAYERS, type Quality } from "../local";
 import { rgb } from "./frame";
@@ -195,8 +195,10 @@ function prepare(strokes: FluidStroke[], rocks: Rock[], margin: number): Prepare
     const pad = stroke.r + margin;
     const self: PreparedStroke = { r: stroke.r, segments, map, box: [Math.min(...xs) - pad, Math.min(...ys) - pad, Math.max(...xs) + pad, Math.max(...ys) + pad], rocks: [] };
     self.rocks = rocks.flatMap((rock) => {
-      const hit = textureAt({ ...self, r: stroke.r + rock.r * 3 }, rock.x, rock.y);
-      return hit ? [{ s: hit.s, t: hit.t, r: rock.r * map.scale }] : [];
+      // Un obstacle en polygone dévie le courant comme un rond de même surface.
+      const r = rock.p ? Math.sqrt(rockArea(rock) / Math.PI) : rock.r;
+      const hit = textureAt({ ...self, r: stroke.r + r * 3 }, rock.x, rock.y);
+      return hit ? [{ s: hit.s, t: hit.t, r: r * map.scale }] : [];
     });
     prepared.push(self);
   });
@@ -326,11 +328,28 @@ ${stroke.rocks
     .join("\n");
 }
 
-/** Distance signée aux rochers (négative dedans), au bord un peu irrégulier. */
+/** Fonctions de distance des obstacles en polygone, une par obstacle (`<name>_poly<i>`). */
+function rockFunctions(rocks: Rock[], name: string) {
+  return rocks.map((rock, index) => (rock.p ? polygonFunction(rock.p, index, name) : "")).filter(Boolean).join("\n");
+}
+
+/**
+ * Distance signée à l'obstacle i (négative dedans). Loin de lui, le cercle qui le contient suffit :
+ * le polygone n'est calculé qu'à ses abords.
+ */
+function rockDistance(rock: Rock, index: number, name: string) {
+  const circle = `length(p - vec2(${f(rock.x)}, ${f(rock.y)})) - ${f(rock.r)}`;
+  return rock.p ? `(${circle} > unit * 2.0 ? ${circle} : ${name}_poly${index}(p))` : `(${circle})`;
+}
+
+/** Distance signée aux obstacles (négative dedans). Un rond a un bord un peu irrégulier ; un polygone suit le contour tracé. */
 function rockCode(rocks: Rock[]) {
   return rocks
-    .map(
-      (rock, index) => `
+    .map((rock, index) =>
+      rock.p
+        ? `
+  dRock = min(dRock, ${rockDistance(rock, index, "rock")});`
+        : `
   {
     vec2 rel = p - vec2(${f(rock.x)}, ${f(rock.y)});
     float rl = length(rel);
@@ -341,6 +360,48 @@ function rockCode(rocks: Rock[]) {
   }`,
     )
     .join("");
+}
+
+/** Distance d'un point à un segment : sert aux coups de pinceau du cache. */
+const HIDE_HELPER = `
+float hideSegment(vec2 p, vec2 a, vec2 b) {
+  vec2 pa = p - a;
+  vec2 ba = b - a;
+  return length(pa - ba * clamp(dot(pa, ba) / max(dot(ba, ba), 0.0001), 0.0, 1.0));
+}`;
+
+const hasHiding = (fluid: Fluid) => fluid.masks.length > 0 || fluid.hideStrokes.length > 0;
+
+/**
+ * Part cachée de la coulée en un point, de 0 à 1 : `float <name>Cover(vec2 p)`. Les polygones de
+ * cache d'abord, puis les coups de pinceau dans l'ordre où ils ont été peints : un coup de gomme
+ * rend visible ce qui était caché dessous. Bord adouci sur un ou deux pixels. Demande HIDE_HELPER.
+ */
+function hideFunction(fluid: Fluid, name: string) {
+  const strokes = fluid.hideStrokes.map((stroke) => {
+    const xs: number[] = [];
+    const ys: number[] = [];
+    for (let i = 0; i < stroke.p.length; i += 2) xs.push(stroke.p[i]), ys.push(stroke.p[i + 1]);
+    const pad = stroke.r + 2;
+    const box: [number, number, number, number] = [Math.min(...xs) - pad, Math.min(...ys) - pad, Math.max(...xs) + pad, Math.max(...ys) + pad];
+    const points = stroke.p.length >= 4 ? stroke.p : [stroke.p[0], stroke.p[1], stroke.p[0] + 0.5, stroke.p[1]];
+    const segments: string[] = [];
+    for (let i = 2; i < points.length; i += 2)
+      segments.push(`d = min(d, hideSegment(p, vec2(${f(points[i - 2])}, ${f(points[i - 1])}), vec2(${f(points[i])}, ${f(points[i + 1])})));`);
+    return `  if (!(${outside(box)})) {
+    float d = 1e5;
+    ${segments.join("\n    ")}
+    float c = 1.0 - smoothstep(-1.0, 1.0, d - ${f(stroke.r)});
+    ${stroke.e ? "h *= 1.0 - c;" : "h = max(h, c);"}
+  }`;
+  });
+  return `${rockFunctions(fluid.masks, name)}
+float ${name}Cover(vec2 p) {
+  float h = 0.0;
+  ${fluid.masks.map((mask, index) => `h = max(h, 1.0 - smoothstep(-1.0, 1.0, ${rockDistance(mask, index, name)}));`).join("\n  ")}
+${strokes.join("\n")}
+  return h;
+}`;
 }
 
 const COMMON = `
@@ -857,7 +918,29 @@ ${lines.map((l) => `  d = min(d, capsule(p, vec2(${f(l.a[0])}, ${f(l.a[1])}), ve
 }`;
 }
 
+/**
+ * Shader d'une coulée, découpé par ses caches : le corps devient `fluidBody`, et un nouveau `main`
+ * ne l'appelle que hors des caches (rien n'est calculé dessous).
+ */
+/**
+ * Shader d'une coulée, découpé par ses caches : le corps devient `fluidBody`, et un nouveau `main`
+ * ne l'appelle que là où la coulée se voit (rien n'est calculé sous un cache).
+ */
 export function fluidSksl(fluid: Fluid, unitGuess: number, clipTo: Fluid[] = [], cartoon = false) {
+  const body = fluidBodySksl(fluid, unitGuess, clipTo, cartoon);
+  if (!body || !hasHiding(fluid)) return body;
+  return `${body.replace("half4 main(float2 coord) {", "half4 fluidBody(float2 coord) {")}
+${HIDE_HELPER}
+${hideFunction(fluid, "hide")}
+half4 main(float2 coord) {
+  vec2 p = coord;
+  float keep = 1.0 - hideCover(p);
+  if (keep <= 0.0) return half4(0.0);
+  return fluidBody(coord) * half(keep);
+}`;
+}
+
+function fluidBodySksl(fluid: Fluid, unitGuess: number, clipTo: Fluid[] = [], cartoon = false) {
   const watery = fluid.kind === "water" || fluid.kind === "pool";
   const margin = MARGIN[fluid.kind] * unitGuess;
   const strokes = prepare(fluid.strokes, fluid.rocks, margin);
@@ -874,6 +957,7 @@ export function fluidSksl(fluid: Fluid, unitGuess: number, clipTo: Fluid[] = [],
   return `${HEADER}${COMMON}${cartoon && !watery ? FLUID_TOON : ""}${TEXTURES[fluid.kind]}
 ${frameFunctions(strokes, "frame", margin)}
 ${aroundFunctions(strokes)}
+${rockFunctions(fluid.rocks, "rock")}
 half4 main(float2 coord) {
   vec2 p = coord;
   if (${outside(box)}) return half4(0.0);
@@ -968,11 +1052,14 @@ export function arrowsSksl(fluids: Fluid[], selected: string | null) {
     const strokes = prepare(fluid.strokes, [], 0).map((stroke) => ({ ...stroke, map: { ...stroke.map, s0: 0, scale: 1, t0: 0, t1: 0, fromHost: 0, toHost: 0 } }));
     return strokes.map((stroke) => ({ stroke, fluid }));
   });
-  if (!parts.length && !fluids.some((fluid) => fluid.sources.length)) return null;
+  if (!parts.length && !fluids.some((fluid) => fluid.sources.length || hasHiding(fluid))) return null;
   const prepared = parts.map((part) => part.stroke);
   const rocks = fluids.flatMap((fluid) => fluid.rocks.map((rock) => ({ rock, fluid })));
   return `${HEADER}
 ${frameFunctions(prepared, "arrow", 0)}
+${rockFunctions(rocks.map(({ rock }) => rock), "obstacle")}
+${fluids.some(hasHiding) ? HIDE_HELPER : ""}
+${fluids.map((fluid, k) => (hasHiding(fluid) ? hideFunction(fluid, `cache${k}`) : "")).join("\n")}
 half4 main(float2 coord) {
   vec2 p = coord;
   float line = unit * 0.05;
@@ -1012,8 +1099,8 @@ half4 main(float2 coord) {
     .join("\n  ")}
   ${rocks
     .map(
-      ({ rock, fluid }) => `{
-    float ring = 1.0 - smoothstep(line * 0.5, line * 1.3, abs(length(p - vec2(${f(rock.x)}, ${f(rock.y)})) - ${f(rock.r)}));
+      ({ rock, fluid }, index) => `{
+    float ring = 1.0 - smoothstep(line * 0.5, line * 1.3, abs(${rockDistance(rock, index, "obstacle")}));
     white = max(white, ring);
     lit = max(lit, ring * ${fluid.id === selected ? "1.0" : "0.0"});
   }`,
@@ -1036,7 +1123,25 @@ half4 main(float2 coord) {
     .join("\n  ")}
   // Pas de chevrons sur les rochers.
   float onRock = 0.0;
-  ${rocks.map(({ rock }) => `onRock = max(onRock, step(length(p - vec2(${f(rock.x)}, ${f(rock.y)})), ${f(rock.r)}));`).join("\n  ")}
+  ${rocks.map(({ rock }, index) => `onRock = max(onRock, step(${rockDistance(rock, index, "obstacle")}, 0.0));`).join("\n  ")}
+  // Caches : contour en pointillés et hachures, pour que le MJ voie où la coulée passe dessous.
+  ${fluids
+    .map((fluid, k) =>
+      hasHiding(fluid)
+        ? `{
+    float cover = cache${k}Cover(p);
+    // Contour : là où la part cachée passe par la moitié, sur un trait de quelques pixels.
+    float edge = 1.0 - smoothstep(0.0, 0.5, abs(cover - 0.5));
+    float dash = step(0.5, fract((p.x - p.y) / (unit * 0.3)));
+    float ring = edge * mix(0.35, 1.0, dash);
+    float hatch = step(0.5, cover) * step(0.8, fract((p.x + p.y) / (unit * 0.25))) * 0.45;
+    white = max(white, max(ring, hatch));
+    lit = max(lit, ring * ${fluid.id === selected ? "1.0" : "0.0"});
+    onRock = max(onRock, step(0.5, cover));
+  }`
+        : "",
+    )
+    .join("\n  ")}
   arrow *= 1.0 - onRock;
   arrowShadow *= 1.0 - onRock;
   white = max(white, arrow);
@@ -1077,7 +1182,7 @@ function watersUnder(fluid: Fluid, all: Fluid[]) {
 
 function cachedSksl(fluid: Fluid, unit: number, all: Fluid[], cartoon: boolean) {
   const under = watersUnder(fluid, all);
-  const key = JSON.stringify([fluid.kind, fluid.strokes, fluid.rocks, fluid.sources, Math.round(unit), under.map((water) => water.strokes), cartoon]);
+  const key = JSON.stringify([fluid.kind, fluid.strokes, fluid.rocks, fluid.sources, fluid.masks, fluid.hideStrokes, Math.round(unit), under.map((water) => water.strokes), cartoon]);
   if (!cache.has(key)) {
     if (cache.size > 64) cache.clear();
     cache.set(key, fluidSksl(fluid, unit, under, cartoon));
@@ -1116,6 +1221,6 @@ export function wantedFluids(fluids: Fluid[], quality: Quality, unit: number, fa
 
 /** Chevrons du sens du courant, pour le MJ pendant qu'il trace. */
 export function wantedArrows(fluids: Fluid[], selected: string | null, unit: number): WantedEffect[] {
-  const sksl = arrowsSksl(fluids.filter((fluid) => fluid.strokes.length || fluid.sources.length), selected);
+  const sksl = arrowsSksl(fluids.filter((fluid) => fluid.strokes.length || fluid.sources.length || hasHiding(fluid)), selected);
   return sksl ? [{ id: `${PLUGIN_ID}/fleches-fluides`, sksl, layer: "CONTROL", uniforms: [{ name: "unit", value: unit }] }] : [];
 }
