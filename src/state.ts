@@ -36,6 +36,10 @@ export const KIND_OPTIONS: Record<WeatherKind, Partial<Record<OptionKey, number>
   heat: {},
 };
 
+/** Formes de la météo « Feuilles » : végétal ou objets qui tombent en tournoyant. */
+export const LEAF_SHAPES = ["leaf", "maple", "petal", "feather", "confetti", "coin"] as const;
+export type LeafShape = (typeof LEAF_SHAPES)[number];
+
 /** Options de cette météo, dans l'ordre du panneau. */
 export const optionsOf = (kind: WeatherKind) => Object.keys(KIND_OPTIONS[kind]) as OptionKey[];
 
@@ -74,6 +78,8 @@ export interface WeatherEffect {
   patches: number;
   /** Options propres à la météo (voir KIND_OPTIONS) : seules celles de son type sont gardées. */
   options: Partial<Record<OptionKey, number>>;
+  /** Forme des particules, pour les feuilles seulement */
+  shape?: LeafShape;
 }
 
 export const TIME_KEYS = ["dawn", "day", "dusk", "night"] as const;
@@ -228,6 +234,7 @@ export function defaultEffect(kind: WeatherKind, zone: string = SCENE_ZONE, id: 
     // Un peu d'irrégularité par défaut, selon la météo : un effet trop régulier paraît artificiel.
     ...DEFAULT_VARIATIONS[kind],
     options: { ...KIND_OPTIONS[kind] },
+    ...(kind === "leaves" ? { shape: "leaf" as const } : {}),
   };
 }
 
@@ -297,6 +304,7 @@ export function parseEffect(value: unknown): WeatherEffect | null {
     options: Object.fromEntries(
       optionsOf(base.kind).map((key) => [key, clamp(isObject(value.options) ? value.options[key] : undefined, 0, 1, base.options[key]!)]),
     ),
+    ...(base.shape ? { shape: LEAF_SHAPES.includes(value.shape as LeafShape) ? (value.shape as LeafShape) : base.shape } : {}),
   };
 }
 

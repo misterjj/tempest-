@@ -92,6 +92,7 @@ function currentBursts(now: number, scene: TempestState | undefined) {
         variety: 0.5,
         patches: 0.5,
         options: { ...wind.options, debris: 0.8 },
+        natural: true,
       });
     }
   }

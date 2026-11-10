@@ -6,7 +6,7 @@ import OBR from "@owlbear-rodeo/sdk";
 import { FLUID_KINDS, HIDE_BRUSH, STROKE_WIDTHS, type FluidKind, type FluidsData } from "../fluids";
 import { flashHtml, helpHtml, watchFlash } from "../hint/help";
 import { modeHint } from "../hint/messages";
-import { currentLanguage, t } from "../i18n";
+import { currentLanguage, onLanguageChange, t } from "../i18n";
 import { keyNames } from "../keys";
 import "../panel/panel.css";
 import { onFluidsChange, readFluids } from "../scene-state";
@@ -193,6 +193,13 @@ OBR.onReady(async () => {
   const theme = await OBR.theme.getTheme();
   document.documentElement.dataset.theme = theme.mode === "LIGHT" ? "light" : "dark";
   shell();
+  // Langue changée dans le panneau : la palette se redessine dans la nouvelle.
+  onLanguageChange(() => {
+    app.querySelector<HTMLElement>("#drag")!.title = t("palette.drag");
+    app.querySelector<HTMLElement>("#drag strong")!.textContent = t("fluid.tool");
+    app.querySelector<HTMLElement>("#close")!.title = t("palette.close");
+    if (settings) render();
+  });
   [fluids, settings, modeId] = await Promise.all([readFluids(), fluidToolSettings(), OBR.tool.getActiveToolMode()]);
   // Ne pas redessiner pendant qu'on fait glisser la largeur ou qu'une liste est ouverte.
   const refresh = () => {

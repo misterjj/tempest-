@@ -6,7 +6,7 @@
 // ne jamais déclarer un uniform personnel sous l'un de ces noms avec un autre type
 // (le shader ne se charge plus, et la carte devient noire).
 
-import { optionsOf, type FilterKind, type WeatherKind } from "../state";
+import { optionsOf, type FilterKind, type LeafShape, type WeatherKind } from "../state";
 import { MASK_HELPERS } from "./mask";
 
 export const HEADER = `
@@ -118,6 +118,118 @@ const LIGHTNING = `
   }`;
 
 /** Corps de chaque météo : calcule `alpha` (0 à 1) et `color`. */
+/**
+ * Mouvement de chaque forme des feuilles : vitesse de chute, tours sur elle-même, balancement,
+ * vitesse de retournement et taille (demi-longueur, en fraction de cellule).
+ */
+const LEAF_MOTION: Record<LeafShape, { fall: number; spin: number; sway: number; flip: number; size: number }> = {
+  leaf: { fall: 1, spin: 1.3, sway: 1, flip: 1.7, size: 0.2 },
+  maple: { fall: 1, spin: 1, sway: 1, flip: 1.4, size: 0.2 },
+  // Le pétale plane : il tombe lentement et dérive beaucoup.
+  petal: { fall: 0.6, spin: 0.9, sway: 1.5, flip: 1.2, size: 0.12 },
+  // La plume se balance comme un pendule (voir sa rotation), sans tourner sur elle-même.
+  feather: { fall: 0.5, spin: 0, sway: 1.5, flip: 0.6, size: 0.24 },
+  // Les confettis papillonnent vite ; les pièces tombent droit en se retournant.
+  confetti: { fall: 0.9, spin: 2.2, sway: 0.8, flip: 4, size: 0.09 },
+  coin: { fall: 1.6, spin: 0.3, sway: 0.4, flip: 3, size: 0.1 },
+};
+
+/**
+ * Dessin d'une particule, dans son repère tourné `d` (unités de cellule). Disponibles : len (demi-
+ * longueur), flip (0,3 à 1 : la forme paraît plus étroite en se retournant), turn (-1 à 1, la face
+ * vue), seed. Chaque forme pose `shape` (couverture, 0 à 1) et `own` (sa couleur).
+ */
+const LEAF_DRAW: Record<LeafShape, string> = {
+  // Ovale pointu, nervure plus sombre ; la couleur varie un peu d'une feuille à l'autre.
+  leaf: `
+    float wid = len * 0.55 * flip * (1.0 - 0.6 * min(abs(d.x) / len, 1.0)) + 0.0001;
+    shape = 1.0 - smoothstep(0.8, 1.0, length(vec2(d.x / len, d.y / wid)));
+    vec3 hue = mix(tint, tint * vec3(1.2, 0.75, 0.55), fract(seed * 5.3) * variety);
+    float vein = (1.0 - smoothstep(0.0, wid * 0.18 + 0.004, abs(d.y))) * step(abs(d.x), len * 0.8);
+    own = hue * (0.75 + 0.25 * flip) * (1.0 - 0.3 * vein);`,
+  // Feuille d'automne à cinq lobes pointus (érable), nervures vers chaque pointe, et sa queue.
+  maple: `
+    vec2 q = vec2(d.x, d.y / flip);
+    float ang = atan(q.y, q.x);
+    float reach = len * (0.45 + 0.55 * pow(abs(cos(ang * 2.5)), 3.0));
+    float r = length(q);
+    float stem = (1.0 - smoothstep(len * 0.03, len * 0.07, abs(q.y))) * step(-len * 1.25, q.x) * step(q.x, 0.0);
+    shape = max(1.0 - smoothstep(reach * 0.88, reach, r), stem);
+    vec3 hue = mix(tint, tint * vec3(1.25, 0.6, 0.35), fract(seed * 5.3) * variety);
+    hue = mix(hue, vec3(0.95, 0.72, 0.18), fract(seed * 9.1) * variety * 0.45);
+    float vein = (1.0 - smoothstep(0.0, 0.12, abs(sin(ang * 2.5)))) * step(r, reach * 0.85);
+    own = hue * (0.75 + 0.25 * flip) * (1.0 - 0.28 * vein);`,
+  // Pétale de cerisier : ovale encoché au bout, plus clair vers la pointe.
+  petal: `
+    vec2 q = vec2(d.x / len, d.y / (len * 0.68 * flip));
+    float body = 1.0 - smoothstep(0.85, 1.0, length(vec2(q.x, q.y * (1.0 + 0.35 * smoothstep(0.2, -1.0, q.x)))));
+    float notch = 1.0 - smoothstep(0.22, 0.32, length(vec2(q.x - 1.02, q.y * 0.8)));
+    shape = body * (1.0 - notch);
+    vec3 hue = mix(tint, vec3(1.0, 0.96, 0.97), fract(seed * 5.3) * variety * 0.6);
+    own = mix(hue * vec3(0.92, 0.72, 0.8), min(hue * 1.08 + 0.05, vec3(1.0)), smoothstep(-0.9, 0.5, q.x)) * (0.82 + 0.18 * flip);`,
+  // Plume : tuyau clair qui dépasse en pointe, barbes plus sombres en chevrons, bord effiloché.
+  feather: `
+    vec2 q = vec2(d.x / len, d.y / (len * 0.42 * (0.5 + 0.5 * flip)));
+    float barbs = fract(q.x * 7.0 + abs(q.y) * 2.2 + seed * 3.0);
+    float edge = 1.0 - 0.18 * barbs;
+    float vane = (1.0 - smoothstep(0.8 * edge, edge, length(vec2(q.x * 1.0, q.y)))) * step(-0.75, q.x);
+    float shaft = (1.0 - smoothstep(0.03, 0.07, abs(d.y) / len)) * step(-1.15, q.x) * step(q.x, 0.95);
+    shape = max(vane, shaft);
+    vec3 hue = tint * mix(1.0, 0.8, fract(seed * 5.3) * variety);
+    own = mix(hue * (0.78 + 0.22 * smoothstep(0.0, 0.5, barbs)), min(hue * 1.15 + 0.08, vec3(1.0)), shaft) * (0.8 + 0.2 * flip);`,
+  // Confettis : petits rectangles (ou rubans), de toutes les couleurs si aucune n'est choisie.
+  confetti: `
+    float strip = step(0.72, fract(seed * 3.3));
+    vec2 q = vec2(d.x / (len * (1.0 + 1.4 * strip)), d.y / (len * 0.55 * flip));
+    shape = (1.0 - smoothstep(0.8, 1.0, abs(q.x))) * (1.0 - smoothstep(0.8, 1.0, abs(q.y)));
+    vec3 party = clamp(0.55 + 0.6 * cos(6.2832 * (fract(seed * 7.7) + vec3(0.0, 0.33, 0.67))), 0.0, 1.0);
+    vec3 hue = mix(tint * (0.75 + 0.4 * fract(seed * 7.7) * variety), party, multi);
+    own = hue * (0.55 + 0.45 * flip);`,
+  // Pièce d'or : un disque qui se retourne (il s'amincit de profil) et brille quand il fait face.
+  coin: `
+    float face = abs(turn);
+    float r = length(vec2(d.x / (len * (0.1 + 0.9 * face)), d.y / len));
+    shape = 1.0 - smoothstep(0.82, 1.0, r);
+    float rim = smoothstep(0.62, 0.72, r);
+    vec3 hue = tint * mix(1.0, 0.85, fract(seed * 5.3) * variety);
+    own = hue * mix(0.95 + 0.2 * (1.0 - r), 0.62, rim) * (0.55 + 0.45 * face);
+    own = mix(own, vec3(1.0, 0.97, 0.85), pow(face, 14.0) * 0.75);`,
+};
+
+/** Feuilles, pétales ou objets qui tombent en tournoyant et se retournent. */
+function leavesBody(shape: LeafShape) {
+  const m = LEAF_MOTION[shape];
+  const f = (value: number) => value.toFixed(2);
+  // La plume oscille autour de l'horizontale, en phase avec son balancement ; le reste tourne.
+  const rot = shape === "feather" ? "(seed - 0.5) * 0.6 + 0.55 * cos(c + seed * 6.28)" : `c * ${f(m.spin)} + seed * 6.28`;
+  return `
+  for (int i = 0; i < 3; i++) {
+    float depth = float(i);
+    if (depth >= layers) break;
+    float cellSize = size * (1.3 + 0.4 * depth);
+    float fall = size * (1.2 + 0.5 * depth) * speed * ${f(m.fall)};
+    vec2 g = vec2(dot(p, side), dot(p, down) - travel(fall)) / cellSize + depth * vec2(6.1, 2.9);
+    vec2 cell = floor(g);
+    float seed = rnd(cell + depth * 37.0);
+    if (seed > dens * 0.7) continue;
+    float c = clock() * (0.8 + seed) * (0.6 + turbulence);
+    vec2 d = g - cell - vec2(0.5 + ${f(m.sway)} * (0.1 + turbulence * 0.1) * sin(c + seed * 6.28), 0.5);
+    float rot = ${rot};
+    d = vec2(cos(rot) * d.x - sin(rot) * d.y, sin(rot) * d.x + cos(rot) * d.y);
+    float turn = sin(c * ${f(m.flip)} + seed * 4.0);
+    // En se retournant, la particule paraît plus étroite.
+    float flip = 0.3 + 0.7 * abs(turn);
+    float len = ${f(m.size)} * sizeOf(seed) * (1.0 - 0.15 * depth);
+    float shape = 0.0;
+    vec3 own = tint;
+    ${LEAF_DRAW[shape]}
+    if (shape * (0.95 - 0.15 * depth) > alpha) {
+      alpha = shape * (0.95 - 0.15 * depth);
+      color = clamp(own, 0.0, 1.0);
+    }
+  }`;
+}
+
 const BODIES: Record<WeatherKind, string> = {
   // Traits fins sur trois profondeurs, éclaboussures et éclairs en option.
   rain: `
@@ -350,34 +462,8 @@ ${LIGHTNING}`,
     }
   }
 ${LIGHTNING}`,
-  // Feuilles ou pétales qui tombent en tournoyant et se retournent.
-  leaves: `
-  for (int i = 0; i < 3; i++) {
-    float depth = float(i);
-    if (depth >= layers) break;
-    float cellSize = size * (1.3 + 0.4 * depth);
-    float fall = size * (1.2 + 0.5 * depth) * speed;
-    vec2 g = vec2(dot(p, side), dot(p, down) - travel(fall)) / cellSize + depth * vec2(6.1, 2.9);
-    vec2 cell = floor(g);
-    float seed = rnd(cell + depth * 37.0);
-    if (seed > dens * 0.7) continue;
-    float c = clock() * (0.8 + seed) * (0.6 + turbulence);
-    vec2 d = g - cell - vec2(0.5 + (0.1 + turbulence * 0.1) * sin(c + seed * 6.28), 0.5);
-    float rot = c * 1.3 + seed * 6.28;
-    d = vec2(cos(rot) * d.x - sin(rot) * d.y, sin(rot) * d.x + cos(rot) * d.y);
-    // En se retournant, la feuille paraît plus étroite.
-    float flip = 0.3 + 0.7 * abs(sin(c * 1.7 + seed * 4.0));
-    float len = 0.2 * sizeOf(seed) * (1.0 - 0.15 * depth);
-    float wid = len * 0.55 * flip * (1.0 - 0.6 * min(abs(d.x) / len, 1.0)) + 0.0001;
-    float leaf = 1.0 - smoothstep(0.8, 1.0, length(vec2(d.x / len, d.y / wid)));
-    if (leaf * (0.95 - 0.15 * depth) > alpha) {
-      alpha = leaf * (0.95 - 0.15 * depth);
-      // D'une feuille à l'autre, la couleur varie un peu ; la nervure est plus sombre.
-      vec3 own = mix(tint, tint * vec3(1.2, 0.75, 0.55), fract(seed * 5.3) * variety);
-      float vein = (1.0 - smoothstep(0.0, wid * 0.18 + 0.004, abs(d.y))) * step(abs(d.x), len * 0.8);
-      color = clamp(own * (0.75 + 0.25 * flip) * (1.0 - 0.3 * vein), 0.0, 1.0);
-    }
-  }`,
+  // Feuilles, pétales ou objets qui tombent en tournoyant et se retournent (voir leavesBody).
+  leaves: leavesBody("leaf"),
   // Lucioles : des points qui errent et s'allument doucement.
   fireflies: `
   vec3 hot = vec3(1.0, 1.0, 0.8);
@@ -540,8 +626,8 @@ const TOON_LEVELS: Record<WeatherKind, [number, number, number, number]> = {
   heat: [0.35, 0, 1, 0],
 };
 
-export const weatherSksl = (kind: WeatherKind, mask: string, cartoon = false) =>
-  `${HEADER}${WEATHER_UNIFORMS}${optionUniforms(kind)}${NATURAL}${MASK_HELPERS}${cartoon ? TOON : ""}
+export const weatherSksl = (kind: WeatherKind, mask: string, cartoon = false, shape: LeafShape = "leaf") =>
+  `${HEADER}${WEATHER_UNIFORMS}${optionUniforms(kind)}${kind === "leaves" && shape === "confetti" ? "uniform float multi;\n" : ""}${NATURAL}${MASK_HELPERS}${cartoon ? TOON : ""}
 ${mask}
 half4 main(float2 coord) {
   float m = mask(coord);
@@ -550,7 +636,7 @@ half4 main(float2 coord) {
   ${SETUP}
   float alpha = 0.0;
   vec3 color = tint;
-  ${cartoon && kind === "rain" ? BODIES.rain.replace("float thin = size * 0.022 * sizeOf(seed);", "float thin = size * 0.06 * sizeOf(seed);").replace("float len = min(", "float len = 0.55 * min(") : BODIES[kind]}${
+  ${kind === "leaves" ? leavesBody(shape) : cartoon && kind === "rain" ? BODIES.rain.replace("float thin = size * 0.022 * sizeOf(seed);", "float thin = size * 0.06 * sizeOf(seed);").replace("float len = min(", "float len = 0.55 * min(") : BODIES[kind]}${
     cartoon
       ? `
   vec4 styled = toon(color, clamp(alpha, 0.0, 1.0), tint, ${TOON_LEVELS[kind].map((v) => v.toFixed(2)).join(", ")});
@@ -576,6 +662,17 @@ export const NATURAL_TINTS: Record<WeatherKind, { x: number; y: number; z: numbe
   sunrays: { x: 1, y: 0.9, z: 0.65 },
   wind: { x: 0.95, y: 0.97, z: 1 },
   heat: { x: 1, y: 1, z: 1 },
+};
+
+/** Couleur naturelle de chaque forme des feuilles. */
+export const SHAPE_TINTS: Record<LeafShape, { x: number; y: number; z: number }> = {
+  leaf: NATURAL_TINTS.leaves,
+  maple: { x: 0.88, y: 0.36, z: 0.1 },
+  petal: { x: 1, y: 0.78, z: 0.86 },
+  feather: { x: 0.92, y: 0.9, z: 0.86 },
+  // Teinte des confettis quand une couleur est choisie ; sans elle, ils sont multicolores.
+  confetti: { x: 1, y: 0.4, z: 0.6 },
+  coin: { x: 1, y: 0.78, z: 0.25 },
 };
 
 // --- Après-rendu : heure du jour et filtres -------------------------------------------------

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { maskFunction, maskSksl, type Stroke } from "../src/render/mask";
 import { maskOverlaySksl, postSksl, weatherSksl } from "../src/render/shaders";
-import { FILTER_KINDS, WEATHER_KINDS } from "../src/state";
+import { FILTER_KINDS, LEAF_SHAPES, WEATHER_KINDS } from "../src/state";
 import { arrowsSksl, fluidSksl } from "../src/render/fluid";
 import { FLUID_KINDS, newFluid, type FluidKind } from "../src/fluids";
 
@@ -47,6 +47,10 @@ describe("shaders", () => {
     ...Object.fromEntries(FLUID_KINDS.map((kind) => [`fluide ${kind}`, fluidSksl(flow(kind), 150)!])),
     arrows: arrowsSksl(FLUID_KINDS.map(flow), "lava")!,
     ...Object.fromEntries(WEATHER_KINDS.filter((kind) => kind !== "heat").map((kind) => [`${kind} cartoon`, weatherSksl(kind, maskFunction("mask", zone, 70), true)])),
+    ...Object.fromEntries(LEAF_SHAPES.flatMap((shape) => [
+      [`feuilles ${shape}`, weatherSksl("leaves", maskFunction("mask", zone, 70), false, shape)],
+      [`feuilles ${shape} cartoon`, weatherSksl("leaves", maskFunction("mask", zone, 70), true, shape)],
+    ])),
     ...Object.fromEntries(FLUID_KINDS.map((kind) => [`fluide ${kind} cartoon`, fluidSksl(flow(kind), 150, [], true)!])),
   };
 

@@ -45,6 +45,19 @@ describe("état de la scène", () => {
     expect(state.looks[1].filters.find((filter) => filter.kind === "sepia")).toEqual({ kind: "sepia", enabled: true, amount: 0.8 });
   });
 
+  it("garde la forme des feuilles, et seulement pour elles", () => {
+    const state = parseState({
+      v: 1,
+      weather: [
+        { id: "a", kind: "leaves", shape: "coin" },
+        { id: "b", kind: "leaves", shape: "dragon" },
+        { id: "c", kind: "leaves" },
+        { id: "d", kind: "rain", shape: "coin" },
+      ],
+    });
+    expect(state.weather.map((effect) => effect.shape)).toEqual(["coin", "leaf", "leaf", undefined]);
+  });
+
   it("ne coupe à la lecture qu'au-delà de la plus haute limite réglable", () => {
     const weather = Array.from({ length: HARD_EFFECTS_PER_ZONE + 3 }, (_, index) => defaultEffect("rain", SCENE_ZONE, `e${index}`));
     expect(parseState({ v: 1, weather }).weather).toHaveLength(HARD_EFFECTS_PER_ZONE);

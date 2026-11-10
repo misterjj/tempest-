@@ -1,5 +1,7 @@
 // Textes de l'interface, en français et en anglais.
 
+import { LANGUAGE_KEY, saveLanguage, savedLanguage } from "./local";
+
 export type Language = "fr" | "en";
 
 const fr = {
@@ -177,6 +179,11 @@ const fr = {
   "settings.warn.shapes": "Le coût d'une zone grandit avec ses segments, à chaque image et chez chaque joueur : au-delà de 300, une machine modeste peut ralentir. Teste chez le joueur le moins bien équipé.",
   "settings.warn.effects": "Tous les effets d'une zone se calculent en même temps chez chaque joueur : une machine modeste peut ralentir. Teste chez le joueur le moins bien équipé.",
   "settings.display": "Mon affichage",
+  "settings.language": "Langue",
+  "settings.languageHelp": "Pour cet ordinateur seulement. Les infobulles de la barre d'outils et du menu clic droit changent au prochain chargement de la salle.",
+  "language.auto": "Auto",
+  "language.fr": "Français",
+  "language.en": "English",
   "settings.style": "Style des effets",
   "settings.style.realistic": "Réaliste",
   "settings.style.cartoon": "Cartoon",
@@ -301,7 +308,14 @@ const fr = {
   "weather.fogHelp": "Brume : nappes qui dérivent",
   "weather.sandHelp": "Sable : voile et grains portés par le vent",
   "weather.embersHelp": "Braises : points incandescents qui montent",
-  "weather.leavesHelp": "Feuilles ou pétales qui tournoient en tombant (la couleur au choix)",
+  "weather.leavesHelp": "Feuilles, pétales, plumes, confettis ou pièces d'or qui tournoient en tombant (forme et couleur au choix)",
+  "weather.shape": "Forme",
+  "shape.leaf": "Feuilles",
+  "shape.maple": "Feuilles d'automne",
+  "shape.petal": "Pétales de cerisier",
+  "shape.feather": "Plumes",
+  "shape.confetti": "Confettis",
+  "shape.coin": "Pièces d'or",
   "weather.firefliesHelp": "Lucioles : points qui errent et s'allument doucement",
   "weather.cloudsHelp": "Ombres de nuages qui glissent sur la carte",
   "weather.sunraysHelp": "Rayons de soleil à travers un feuillage",
@@ -496,6 +510,11 @@ const en: Record<Key, string> = {
   "settings.warn.shapes": "A zone's cost grows with its segments, every frame and for every player: above 300, a modest machine can slow down. Test on your least powerful player's computer.",
   "settings.warn.effects": "All effects of a zone are computed at once for every player: a modest machine can slow down. Test on your least powerful player's computer.",
   "settings.display": "My display",
+  "settings.language": "Language",
+  "settings.languageHelp": "On this computer only. Toolbar and right-click menu tooltips change the next time the room loads.",
+  "language.auto": "Auto",
+  "language.fr": "Français",
+  "language.en": "English",
   "settings.style": "Effect style",
   "settings.style.realistic": "Realistic",
   "settings.style.cartoon": "Cartoon",
@@ -620,7 +639,14 @@ const en: Record<Key, string> = {
   "weather.fogHelp": "Fog: drifting banks",
   "weather.sandHelp": "Sand: haze and grains carried by the wind",
   "weather.embersHelp": "Embers: glowing sparks rising",
-  "weather.leavesHelp": "Leaves or petals tumbling down (pick the color)",
+  "weather.leavesHelp": "Leaves, petals, feathers, confetti or gold coins tumbling down (pick the shape and color)",
+  "weather.shape": "Shape",
+  "shape.leaf": "Leaves",
+  "shape.maple": "Autumn leaves",
+  "shape.petal": "Cherry petals",
+  "shape.feather": "Feathers",
+  "shape.confetti": "Confetti",
+  "shape.coin": "Gold coins",
   "weather.firefliesHelp": "Fireflies: wandering lights that glow softly",
   "weather.cloudsHelp": "Cloud shadows sliding over the map",
   "weather.sunraysHelp": "Sun rays through foliage",
@@ -640,11 +666,47 @@ const en: Record<Key, string> = {
 
 export const DICTIONARIES: Record<Language, Record<Key, string>> = { fr, en };
 
+export const LANGUAGES: Language[] = ["fr", "en"];
+
 let forced: Language | undefined;
+/** Langue choisie dans les réglages, lue une fois puis suivie (voir onLanguageChange). */
+let chosen: Language | null | undefined;
+
+const isLanguage = (value: unknown): value is Language => LANGUAGES.includes(value as Language);
+
+export const browserLanguage = (): Language =>
+  typeof navigator !== "undefined" && navigator.language?.toLowerCase().startsWith("fr") ? "fr" : "en";
+
+/** Langue des réglages, ou "auto" pour suivre le navigateur. */
+export function languageSetting(): Language | "auto" {
+  if (chosen === undefined) {
+    const saved = savedLanguage();
+    chosen = isLanguage(saved) ? saved : null;
+  }
+  return chosen ?? "auto";
+}
 
 export function currentLanguage(): Language {
   if (forced) return forced;
-  return typeof navigator !== "undefined" && navigator.language?.toLowerCase().startsWith("fr") ? "fr" : "en";
+  const setting = languageSetting();
+  return setting === "auto" ? browserLanguage() : setting;
+}
+
+/** Choix de l'utilisateur, pour ce navigateur ; les autres pages de l'extension le suivent. */
+export function chooseLanguage(language: Language | "auto") {
+  chosen = language === "auto" ? null : language;
+  saveLanguage(chosen);
+  if (typeof document !== "undefined") document.documentElement.lang = currentLanguage();
+}
+
+/** Langue changée depuis une autre page de l'extension (panneau, palette, fond). */
+export function onLanguageChange(callback: () => void) {
+  window.addEventListener("storage", (event) => {
+    if (event.key !== LANGUAGE_KEY) return;
+    chosen = isLanguage(event.newValue) ? event.newValue : null;
+    document.documentElement.lang = currentLanguage();
+    callback();
+  });
 }
 
 /** Pour les tests : impose une langue. */

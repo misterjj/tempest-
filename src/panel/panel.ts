@@ -3,7 +3,7 @@
 // pendant le glissement (au plus une écriture toutes les 120 ms).
 
 import OBR from "@owlbear-rodeo/sdk";
-import { currentLanguage, t } from "../i18n";
+import { LANGUAGES, chooseLanguage, currentLanguage, languageSetting, onLanguageChange, t, type Language } from "../i18n";
 import { DEFAULT_LIMITS, LIMIT_RANGES, parseLimit, raisedLimits, type Limits } from "../limits";
 import { QUALITIES, isMuted, qualitySetting, setMuted, setQuality, type Quality } from "../local";
 import { lightAt } from "../render/daylight";
@@ -49,6 +49,7 @@ import {
   settleHour,
   WEATHER_KINDS,
   HIDDEN_FIELDS,
+  LEAF_SHAPES,
   OPTION_KEYS,
   defaultEffect,
   optionsOf,
@@ -57,6 +58,7 @@ import {
   MAX_STATE_BYTES,
   type Look,
   type TempestState,
+  type LeafShape,
   type WeatherEffect,
   type WeatherKind,
 } from "../state";
@@ -225,7 +227,7 @@ function effectCard(effect: WeatherEffect) {
   const head = `
     <div class="card-head">
       <button type="button" class="card-title" data-fold="${effect.id}" aria-expanded="${unfolded}" title="${t(unfolded ? "weather.fold" : "weather.unfold")}">
-        ${icon("chevron", "chevron")}<span class="kind">${weatherIcon(effect.kind)}</span>${t(`weather.${effect.kind}`)}
+        ${icon("chevron", "chevron")}<span class="kind">${weatherIcon(effect.kind)}</span>${effect.shape ? t(`shape.${effect.shape}`) : t(`weather.${effect.kind}`)}
         <span class="summary">${percent(effect.intensity)}</span>
       </button>
       <button type="button" class="icon-button" data-toggle="${effect.id}" aria-pressed="${!effect.enabled}" title="${t(effect.enabled ? "weather.hide" : "weather.show")}">${icon(effect.enabled ? "eye" : "eyeOff")}</button>
@@ -237,6 +239,14 @@ function effectCard(effect: WeatherEffect) {
     <div class="card ${effect.enabled ? "" : "off"}">
       ${head}
       <div class="card-body">
+        ${
+          effect.shape
+            ? `<label class="field-row shape-row">
+          <span>${t("weather.shape")}</span>
+          <select data-shape="${effect.id}">${LEAF_SHAPES.map((shape) => `<option value="${shape}"${shape === effect.shape ? " selected" : ""}>${t(`shape.${shape}`)}</option>`).join("")}</select>
+        </label>`
+            : ""
+        }
         <label class="field" title="${t("weather.directionHelp")}">
           <span class="field-row">${t("weather.direction")}</span>
           <span class="direction-slider">
@@ -744,6 +754,21 @@ function onFluidRange(key: string, value: number) {
 
 const LIMIT_KEYS = ["zones", "shapes", "effects", "lamps"] as const;
 
+/** Choix de la langue, pour le MJ comme pour les joueurs. */
+function languageSection() {
+  const setting = languageSetting();
+  return `
+    <section class="settings">
+      <p class="label">${t("settings.language")}</p>
+      <div class="segmented" role="group" aria-label="${t("settings.language")}">
+        ${(["auto", ...LANGUAGES] as const)
+          .map((value) => `<button type="button" data-language="${value}" aria-pressed="${value === setting}" ${value === "auto" ? "" : `lang="${value}"`}>${t(`language.${value}`)}</button>`)
+          .join("")}
+      </div>
+      <p class="hint flush">${t("settings.languageHelp")}</p>
+    </section>`;
+}
+
 function settingsTab() {
   const quality = qualitySetting();
   const raised = raisedLimits(limits);
@@ -777,7 +802,8 @@ function settingsTab() {
           .join("")}
       </div>
       <p class="hint flush">${t("settings.displayHelp")}</p>
-    </section>`;
+    </section>
+    ${languageSection()}`;
 }
 
 let render = renderGM;
@@ -914,6 +940,9 @@ function wireGM() {
     else if (data.quality) {
       setQuality(data.quality as Quality | "auto");
       render();
+    } else if (data.language) {
+      chooseLanguage(data.language as Language | "auto");
+      render();
     }
     else if (data.tab) {
       tab = data.tab as Tab;
@@ -998,6 +1027,9 @@ function wireGM() {
         OBR.notification.show(t("panel.saveError"), "ERROR");
       });
       render();
+    } else if (input.dataset.shape) {
+      const shape = input.value as LeafShape;
+      if (LEAF_SHAPES.includes(shape)) change(() => (effectById(input.dataset.shape!)!.shape = shape));
     } else if ((input as HTMLInputElement).dataset.fluidName) {
       const fluid = fluidById((input as HTMLInputElement).dataset.fluidName!);
       if (fluid) changeFluids(() => (fluid.name = input.value.trim().slice(0, 40)));
@@ -1067,11 +1099,18 @@ function renderPlayer() {
           .map((value) => `<button type="button" data-quality="${value}" aria-pressed="${value === quality}">${t(`quality.${value}`)}</button>`)
           .join("")}
       </div>
+      ${languageSection()}
     </main>`;
   app.querySelector<HTMLInputElement>("#mute")!.onchange = (event) => setMuted((event.target as HTMLInputElement).checked);
   app.querySelectorAll<HTMLButtonElement>("[data-quality]").forEach((button) => {
     button.onclick = () => {
       setQuality(button.dataset.quality as Quality | "auto");
+      renderPlayer();
+    };
+  });
+  app.querySelectorAll<HTMLButtonElement>("[data-language]").forEach((button) => {
+    button.onclick = () => {
+      chooseLanguage(button.dataset.language as Language | "auto");
       renderPlayer();
     };
   });
@@ -1114,6 +1153,11 @@ OBR.onReady(async () => {
   document.documentElement.lang = currentLanguage();
   await applyTheme();
   OBR.theme.onChange(applyTheme);
+  // Langue changée ailleurs (un autre panneau de l'extension) : le panneau suit.
+  onLanguageChange(() => {
+    if (render === renderPlayer) renderPlayer();
+    else if (state && !holding) renderGM();
+  });
   if ((await OBR.player.getRole()) !== "GM") {
     render = renderPlayer;
     renderPlayer();

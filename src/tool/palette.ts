@@ -3,7 +3,7 @@
 // La palette se déplace par sa barre de titre (voir window/move.ts).
 
 import OBR from "@owlbear-rodeo/sdk";
-import { currentLanguage, t } from "../i18n";
+import { currentLanguage, onLanguageChange, t } from "../i18n";
 import type { Limits } from "../limits";
 import "../panel/panel.css";
 import { deleteZone, onLimitsChange, onZonesChange, readLimits, readZones, updateZones } from "../scene-state";
@@ -257,6 +257,13 @@ OBR.onReady(async () => {
   const theme = await OBR.theme.getTheme();
   document.documentElement.dataset.theme = theme.mode === "LIGHT" ? "light" : "dark";
   shell();
+  // Langue changée dans le panneau : la palette se redessine dans la nouvelle.
+  onLanguageChange(() => {
+    app.querySelector<HTMLElement>("#drag")!.title = t("palette.drag");
+    app.querySelector<HTMLElement>("#drag strong")!.textContent = t("tool.name");
+    app.querySelector<HTMLElement>("#close")!.title = t("palette.close");
+    if (settings) render();
+  });
   [zones, limits, settings] = await Promise.all([readZones(), readLimits(), toolSettings()]);
   const readMode = (id: string | undefined) => {
     modeId = id;

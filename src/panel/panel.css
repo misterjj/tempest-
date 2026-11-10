@@ -207,3 +207,8 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
 .bar .burst .icon { width: 17px; height: 17px; }
 .bar .burst:active { transform: scale(0.9); }
 .pace-row { margin-top: 12px; }
+
+/* Forme des feuilles, en tête de leur carte */
+.shape-row select {
+  flex: 1; min-width: 0; max-width: 60%; padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--text); font: inherit;
+}

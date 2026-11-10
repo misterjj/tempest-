@@ -24,7 +24,7 @@ export function wantedWeather(weather: WeatherFrame[], zones: Zone[], quality: Q
     return [
       {
         id: `${PLUGIN_ID}/meteo/${effect.id}`,
-        sksl: weatherSksl(effect.kind, mask, cartoon),
+        sksl: weatherSksl(effect.kind, mask, cartoon, effect.shape),
         layer: "RULER" as const,
         blend: LIGHT_KINDS.has(effect.kind) ? ("SCREEN" as const) : undefined,
         uniforms: [
@@ -41,6 +41,7 @@ export function wantedWeather(weather: WeatherFrame[], zones: Zone[], quality: Q
           { name: "variety", value: effect.variety },
           { name: "patches", value: effect.patches },
           ...optionsOf(effect.kind).map((key) => ({ name: `o_${key}`, value: effect.options[key] ?? 0 })),
+          ...(effect.shape === "confetti" ? [{ name: "multi", value: effect.natural ? 1 : 0 }] : []),
         ],
       },
     ];

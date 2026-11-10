@@ -1,10 +1,11 @@
-// Réglages propres à ce navigateur : qualité du rendu et « Couper les effets » pour soi seul.
+// Réglages propres à ce navigateur : qualité du rendu, « Couper les effets » pour soi seul, et langue.
 
 export type Quality = "low" | "medium" | "high";
 export const QUALITIES: Quality[] = ["low", "medium", "high"];
 
 const QUALITY_KEY = "tempest/qualite";
 const MUTE_KEY = "tempest/coupe";
+export const LANGUAGE_KEY = "tempest/langue";
 
 /** Part des particules gardées : le niveau bas les divise par 4. */
 export const PARTICLE_FACTOR: Record<Quality, number> = { low: 0.25, medium: 0.6, high: 1 };
@@ -51,9 +52,13 @@ export const setQuality = (quality: Quality | "auto") => write(QUALITY_KEY, qual
 export const isMuted = () => read(MUTE_KEY) === "1";
 export const setMuted = (muted: boolean) => write(MUTE_KEY, muted ? "1" : null);
 
+/** Langue choisie ("fr", "en"), ou null pour suivre le navigateur. */
+export const savedLanguage = () => read(LANGUAGE_KEY);
+export const saveLanguage = (language: string | null) => write(LANGUAGE_KEY, language);
+
 /** Les autres pages de l'extension (panneau, fond) suivent le changement. */
 export function onLocalChange(callback: () => void) {
   window.addEventListener("storage", (event) => {
-    if (event.key === QUALITY_KEY || event.key === MUTE_KEY) callback();
+    if (event.key === QUALITY_KEY || event.key === MUTE_KEY || event.key === LANGUAGE_KEY) callback();
   });
 }

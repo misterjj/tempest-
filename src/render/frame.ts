@@ -7,12 +7,13 @@ import {
   NEUTRAL_FILTERS,
   SCENE_ZONE,
   type FilterKind,
+  type LeafShape,
   type TempestState,
   type WeatherKind,
 } from "../state";
 import { lookIsActive } from "../presets";
 import { lightAt, type Light } from "./daylight";
-import { NATURAL_TINTS } from "./shaders";
+import { NATURAL_TINTS, SHAPE_TINTS } from "./shaders";
 
 type Vec3 = { x: number; y: number; z: number };
 
@@ -40,6 +41,10 @@ export interface WeatherFrame {
   variety: number;
   patches: number;
   options: Record<string, number>;
+  /** Forme des feuilles : elle change le code du shader, elle passe donc d'un coup. */
+  shape?: LeafShape;
+  /** Couleur naturelle (aucune choisie) : les confettis sont alors de toutes les couleurs. */
+  natural: boolean;
 }
 
 export interface LookFrame {
@@ -79,11 +84,13 @@ export function frameOf(state: TempestState, zoneIds: Set<string>): Frame {
         turbulence: effect.turbulence,
         intensity: effect.intensity,
         opacity: effect.opacity,
-        tint: effect.color ? rgb(effect.color) : NATURAL_TINTS[effect.kind],
+        tint: effect.color ? rgb(effect.color) : effect.shape ? SHAPE_TINTS[effect.shape] : NATURAL_TINTS[effect.kind],
         gusts: effect.gusts,
         variety: effect.variety,
         patches: effect.patches,
         options: { ...effect.options } as Record<string, number>,
+        shape: effect.shape,
+        natural: !effect.color,
       })),
     looks: state.looks
       .filter((look) => lookIsActive(look) && exists(look.zone))
