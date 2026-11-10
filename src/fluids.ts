@@ -21,8 +21,6 @@ export const MAX_FLUIDS = 12;
 export const MAX_SEGMENTS = 80;
 export const MAX_ROCKS = 24;
 export const MAX_SOURCES = 16;
-/** Sommets d'un obstacle : chacun coûte un peu à chaque image, chez chaque joueur. */
-export const MAX_ROCK_POINTS = 16;
 /** Caches : polygones où la coulée n'est pas dessinée (sous un pont, derrière un mur). */
 export const MAX_MASKS = 24;
 /** Cache au pinceau : segments au plus par coulée (chacun se calcule à chaque image). */
@@ -162,7 +160,8 @@ export const rockArea = (rock: Rock) => (rock.p ? Math.abs(signedArea(pointsOf(r
 
 /**
  * Obstacle prêt à stocker, d'après les sommets cliqués ou un contour tracé à main levée : les
- * sommets presque alignés sont retirés (méthode de Visvalingam) jusqu'à `MAX_ROCK_POINTS` au plus.
+ * sommets presque alignés sont retirés (méthode de Visvalingam), sans nombre de sommets maximal : le
+ * rendu ne calcule le polygone que près de lui, et la taille totale des fluides reste plafonnée.
  * `tolerance` : écart, en pixels, en dessous duquel un sommet ne compte pas. Null s'il ne reste
  * pas de quoi faire une surface.
  */
@@ -183,7 +182,7 @@ export function polygonRock(input: Point[], tolerance: number): Rock | null {
   while (points.length > 3) {
     let smallest = 0;
     for (let i = 1; i < points.length; i++) if (triangle(i) < triangle(smallest)) smallest = i;
-    if (points.length <= MAX_ROCK_POINTS && triangle(smallest) >= minimum) break;
+    if (triangle(smallest) >= minimum) break;
     points.splice(smallest, 1);
   }
   if (points.length < 3) return null;
@@ -408,14 +407,14 @@ export function parseFluids(value: unknown): FluidsData {
       if (!isObject(rock) || !isNumber(rock.x) || !isNumber(rock.y) || !isNumber(rock.r) || rock.r <= 0) continue;
       const outline = rock.p;
       if (outline === undefined) fluid.rocks.push({ x: rock.x, y: rock.y, r: rock.r });
-      else if (Array.isArray(outline) && outline.length >= 6 && outline.length <= MAX_ROCK_POINTS * 2 && !(outline.length % 2) && outline.every(isNumber))
+      else if (Array.isArray(outline) && outline.length >= 6 && !(outline.length % 2) && outline.every(isNumber))
         fluid.rocks.push({ x: rock.x, y: rock.y, r: rock.r, p: outline as number[] });
     }
     for (const mask of Array.isArray(raw.masks) ? raw.masks : []) {
       if (fluid.masks.length >= MAX_MASKS) break;
       const outline = isObject(mask) ? mask.p : undefined;
       if (!isObject(mask) || !isNumber(mask.x) || !isNumber(mask.y) || !isNumber(mask.r) || mask.r <= 0) continue;
-      if (Array.isArray(outline) && outline.length >= 6 && outline.length <= MAX_ROCK_POINTS * 2 && !(outline.length % 2) && outline.every(isNumber))
+      if (Array.isArray(outline) && outline.length >= 6 && !(outline.length % 2) && outline.every(isNumber))
         fluid.masks.push({ x: mask.x, y: mask.y, r: mask.r, p: outline as number[] });
     }
     for (const stroke of Array.isArray(raw.hideStrokes) ? raw.hideStrokes : []) {

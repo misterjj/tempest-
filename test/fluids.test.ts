@@ -15,7 +15,6 @@ import {
   hideStrokeAt,
   maskAt,
   polygonRock,
-  MAX_ROCK_POINTS,
   reverseStroke,
   rockAt,
   strokeAt,
@@ -61,9 +60,10 @@ describe("coulées", () => {
     expect(rock.p).toEqual([0, 0, 100, 0, 100, 100, 0, 100]);
     expect([rock.x, rock.y]).toEqual([50, 50]);
     expect(rock.r).toBeGreaterThanOrEqual(Math.hypot(50, 50));
-    // Un cercle de 200 points garde au plus MAX_ROCK_POINTS sommets.
-    const circle = polygonRock(Array.from({ length: 200 }, (_, i) => ({ x: Math.cos(i / 31.8) * 100, y: Math.sin(i / 31.8) * 100 })), 1)!;
-    expect(circle.p!.length / 2).toBeLessThanOrEqual(MAX_ROCK_POINTS);
+    // Pas de nombre de sommets maximal : un grand contour garde sa forme, seuls les points en trop partent.
+    const circle = polygonRock(Array.from({ length: 200 }, (_, i) => ({ x: Math.cos((i / 200) * Math.PI * 2) * 1000, y: Math.sin((i / 200) * Math.PI * 2) * 1000 })), 1)!;
+    expect(circle.p!.length / 2).toBeGreaterThan(16);
+    expect(circle.p!.length / 2).toBeLessThanOrEqual(200);
     // Trois points presque alignés : pas de surface.
     expect(polygonRock([{ x: 0, y: 0 }, { x: 100, y: 1 }, { x: 200, y: 0 }], 5)).toBeNull();
     expect(polygonRock([{ x: 0, y: 0 }, { x: 100, y: 0 }], 5)).toBeNull();
@@ -120,6 +120,18 @@ describe("coulées", () => {
     expect(hideStrokeAt(data, { x: 110, y: 40 })).toBeNull();
     // Relu tel quel, gomme comprise.
     expect(parseFluids(JSON.parse(JSON.stringify(data))).fluids[0].hideStrokes).toEqual(fluid.hideStrokes);
+  });
+
+  it("relit un obstacle et un cache de plus de 16 sommets", () => {
+    const outline = Array.from({ length: 40 }, (_, i) => [Math.round(Math.cos((i / 40) * Math.PI * 2) * 300), Math.round(Math.sin((i / 40) * Math.PI * 2) * 300)]).flat().map((v) => v + 0);
+    const fluid = river();
+    fluid.rocks.push({ x: 0, y: 0, r: 300, p: outline });
+    fluid.masks.push({ x: 0, y: 0, r: 300, p: outline });
+    const data = emptyFluids();
+    data.fluids.push(fluid);
+    const read = parseFluids(JSON.parse(JSON.stringify(data))).fluids[0];
+    expect(read.rocks[1].p).toEqual(outline);
+    expect(read.masks[0].p).toEqual(outline);
   });
 
   it("refuse un trait ou un rocher de trop", () => {

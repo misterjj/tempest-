@@ -8,7 +8,6 @@ import { t } from "../i18n";
 import {
   FLUID_KINDS,
   FluidFullError,
-  MAX_ROCK_POINTS,
   STROKE_WIDTHS,
   TooManyFluidsError,
   addFluid,
@@ -622,8 +621,8 @@ const fluidPolygons = {
   async list() {
     const data = await readFluids();
     return data.fluids.flatMap((fluid) => [
-      ...fluid.rocks.flatMap((rock, i) => (rock.p ? [{ key: `${fluid.id}/rock/${i}`, points: rock.p, color: KIND_COLORS[fluid.kind], max: MAX_ROCK_POINTS }] : [])),
-      ...fluid.masks.flatMap((mask, i) => (mask.p ? [{ key: `${fluid.id}/mask/${i}`, points: mask.p, color: "#ffffff", max: MAX_ROCK_POINTS }] : [])),
+      ...fluid.rocks.flatMap((rock, i) => (rock.p ? [{ key: `${fluid.id}/rock/${i}`, points: rock.p, color: KIND_COLORS[fluid.kind], max: Infinity }] : [])),
+      ...fluid.masks.flatMap((mask, i) => (mask.p ? [{ key: `${fluid.id}/mask/${i}`, points: mask.p, color: "#ffffff", max: Infinity }] : [])),
     ]);
   },
   async save(key: string, points: number[]) {
