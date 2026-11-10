@@ -28,6 +28,27 @@ Add the custom extension `http://localhost:5175/manifest.json` in Owlbear Rodeo,
 - `src/panel/`: the toolbar panel (GM: moods, weather, time, filters; players: mute and quality).
 - `src/background.ts`: starts the renderer and adds the "Add weather" context menu.
 
+## Guide site
+
+`index.html` (English) and `fr/index.html` (French) are the guide site, served at the root of the deployment
+(`src/guide/`). Links still to fill in: `LINKS` at the top of `src/guide/guide.ts` (store, Patreon).
+
+Videos go in `public/guide/media/`, muted H.264 MP4, 16:9, under 2 MB each. Until a file exists, its frame shows the
+expected name (and the comparisons show `placeholder-map.jpg` with fake rain).
+
+| File | Section |
+| --- | --- |
+| `hero-on.mp4`, `hero-off.jpg` (or `.mp4`) | Opening comparison: same map and camera, with and without Tempest! |
+| `moods.mp4` | Moods |
+| `weather.mp4`, `weather-storm.mp4`, `weather-snow.mp4` | Weather |
+| `zones.mp4` | Painted zones |
+| `time.mp4`, `lamp-token.mp4`, `lamp-fixed.mp4` | Time of day and lights |
+| `fluids.mp4`, `fluids-lava.mp4`, `fluids-hide.mp4` | Fluids |
+| `filters.mp4`, `bursts.mp4`, `transition.mp4` | Filters and one-shot effects |
+| `style-cartoon.mp4`, `style-realistic.mp4` | Realistic / cartoon comparison |
+
+For a comparison, keep the camera still and record both versions with the same length: they are played in sync.
+
 ## Licence
 
 [MIT](LICENSE).

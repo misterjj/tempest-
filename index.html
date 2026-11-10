@@ -1,0 +1,350 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Tempest! · Weather, light and mood for Owlbear Rodeo</title>
+    <meta name="description" content="Weather, time of day, lights, flowing water and lava for Owlbear Rodeo. Paint where it rains, switch the whole scene to a stormy night in one click." />
+    <link rel="alternate" hreflang="en" href="https://tempest-owlbear.pages.dev/" />
+    <link rel="alternate" hreflang="fr" href="https://tempest-owlbear.pages.dev/fr/" />
+    <link rel="icon" href="/icon.svg" />
+    <link rel="stylesheet" href="/src/guide/guide.css" />
+  </head>
+  <body>
+    <canvas id="rain" aria-hidden="true"></canvas>
+    <div id="flash" aria-hidden="true"></div>
+
+    <header class="top">
+      <a class="brand" href="#"><img src="/icon.svg" alt="" /> Tempest!</a>
+      <nav>
+        <a href="#compare">Compare</a>
+        <a href="#moods">Features</a>
+        <a href="#install">Install</a>
+        <a href="#faq">FAQ</a>
+      </nav>
+      <a class="lang" href="/fr/" hreflang="fr" lang="fr" title="Version française">FR</a>
+      <button class="menu-toggle" type="button" aria-expanded="false" aria-label="Menu"><span></span></button>
+      <a class="button small primary" href="#install">Install</a>
+    </header>
+
+    <section class="hero">
+      <canvas id="sky" aria-hidden="true"></canvas>
+      <div class="hero-inner">
+        <div class="hero-text">
+          <p class="kicker">Extension for Owlbear Rodeo</p>
+          <h1>Let the weather<br /><span class="spark">tell the story.</span></h1>
+          <p class="lead">
+            Rain on the docks, fog in the marsh, torches in the night, lava that flows.
+            Set the mood of every scene in a click, and the whole table feels it.
+          </p>
+          <div class="actions">
+            <a class="button primary" href="#install">Add it to your room</a>
+            <a class="button ghost" href="#moods">See it in action</a>
+          </div>
+          <p class="hint"><span class="on-mouse">Drag</span><span class="on-touch">Slide</span> the handle to see the same map with and without Tempest!</p>
+        </div>
+        <figure class="compare" data-on="/guide/media/hero-on.mp4" data-off="/guide/media/hero-off.jpg" data-fallback="/guide/media/placeholder-map.jpg">
+          <div class="compare-stage">
+            <div class="layer off"></div>
+            <div class="layer on"></div>
+            <span class="tag off"><small>Tempest!</small>OFF</span>
+            <span class="tag on"><small>Tempest!</small>ON</span>
+            <div class="handle" role="slider" tabindex="0" aria-label="Compare with and without Tempest!" aria-valuemin="0" aria-valuemax="100" aria-valuenow="50">
+              <span class="grip"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l-6 6 6 6M15 6l6 6-6 6" /></svg></span>
+            </div>
+          </div>
+        </figure>
+      </div>
+      <a class="scroll" href="#compare" aria-label="Scroll down"></a>
+    </section>
+
+    <section id="compare" class="band">
+      <div class="wrap">
+        <header class="chapter-head center">
+          <p class="kicker">Side by side</p>
+          <h2>Way more than a passing shower.</h2>
+        </header>
+        <div class="checklist">
+          <div class="row head">
+            <span></span>
+            <span class="col them">Weather<small>official extension</small></span>
+            <span class="col us">Tempest!</span>
+          </div>
+          <div class="row" style="--i: 0">
+            <span class="what"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17.5 14a4.5 4.5 0 0 0-1-8.9A6 6 0 0 0 5 7.5 4 4 0 0 0 6 14.9"/><path d="M8 18l-1 3M12 18l-1 3M16 18l-1 3"/></svg>Weather types</span>
+            <span class="mark them yes count" aria-label="6 weather types">6</span>
+            <span class="mark us yes count" aria-label="12 weather types">12</span>
+          </div>
+          <div class="row" style="--i: 1">
+            <span class="what"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 3l3 3-9 9-3-3z"/><path d="M9 12c-3 0-5 2-5 5 0 2-1 3-2 4 4 0 9-1 9-6"/></svg>Painted zones</span>
+            <span class="mark them no" aria-label="No">✕</span>
+            <span class="mark us yes" aria-label="Yes">✓</span>
+          </div>
+          <div class="row" style="--i: 2">
+            <span class="what"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>Day and night</span>
+            <span class="mark them no" aria-label="No">✕</span>
+            <span class="mark us yes" aria-label="Yes">✓</span>
+          </div>
+          <div class="row" style="--i: 3">
+            <span class="what"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2c2 3 5 5 5 10a5 5 0 0 1-10 0c0-2 1-3.5 2-4.5 0 2 1 3 2 3 0-3-1-5.5 1-8.5z"/></svg>Lights</span>
+            <span class="mark them no" aria-label="No">✕</span>
+            <span class="mark us yes" aria-label="Yes">✓</span>
+          </div>
+          <div class="row" style="--i: 4">
+            <span class="what"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 8c2-2 4-2 6 0s4 2 6 0 4-2 6 0M2 13c2-2 4-2 6 0s4 2 6 0 4-2 6 0M2 18c2-2 4-2 6 0s4 2 6 0 4-2 6 0"/></svg>Water and lava</span>
+            <span class="mark them no" aria-label="No">✕</span>
+            <span class="mark us yes" aria-label="Yes">✓</span>
+          </div>
+          <div class="row" style="--i: 5">
+            <span class="what"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor"/></svg>Screen filters</span>
+            <span class="mark them no" aria-label="No">✕</span>
+            <span class="mark us yes" aria-label="Yes">✓</span>
+          </div>
+          <div class="row" style="--i: 6">
+            <span class="what"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2L4 14h7l-1 8 9-12h-7z"/></svg>Lightning and quakes</span>
+            <span class="mark them no" aria-label="No">✕</span>
+            <span class="mark us yes" aria-label="Yes">✓</span>
+          </div>
+          <div class="row" style="--i: 7">
+            <span class="what"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 3l1.8 4.2L17 9l-4.2 1.8L11 15l-1.8-4.2L5 9l4.2-1.8z"/><path d="M18 14l.8 1.7 1.7.8-1.7.8L18 19l-.8-1.7-1.7-.8 1.7-.8z"/></svg>One-click moods</span>
+            <span class="mark them no" aria-label="No">✕</span>
+            <span class="mark us yes" aria-label="Yes">✓</span>
+          </div>
+          <div class="row" style="--i: 8">
+            <span class="what"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20l4-1 11-11-3-3L5 16z"/><path d="M14 6l3 3"/></svg>Cartoon style</span>
+            <span class="mark them no" aria-label="No">✕</span>
+            <span class="mark us yes" aria-label="Yes">✓</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="moods" class="chapter">
+      <div class="wrap split">
+        <div class="text">
+          <p class="numeral">I</p>
+          <h2>A whole mood in one click</h2>
+          <p class="sub">Pick a mood, and the weather, the time of day and the filters change together, smoothly, for every player.</p>
+          <ul class="runes">
+            <li><strong>12 moods</strong> ready to use: bright sun, stormy night, blizzard, toxic mist, sandstorm, forge…</li>
+            <li>Apply it to the whole scene or to <strong>one zone</strong> only.</li>
+            <li>Changed your mind? <em>Undo</em> brings everything back.</li>
+            <li>Save your own moods and find them again in every room.</li>
+          </ul>
+        </div>
+        <figure class="clip" data-src="/guide/media/moods.mp4">
+          <figcaption>From bright sun to stormy night, in one click</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section id="weather" class="chapter reverse">
+      <div class="wrap split">
+        <div class="text">
+          <p class="numeral">II</p>
+          <h2>Twelve kinds of weather</h2>
+          <p class="sub">Rain, snow, hail, fog, sand, wind, embers, leaves, fireflies, clouds, sun rays and heat haze. Stack them, tune them, hide them with an eye.</p>
+          <ul class="runes">
+            <li>Set the <strong>direction</strong> with an arrow, then speed, intensity, scale and colour.</li>
+            <li>Natural variations: <strong>gusts</strong>, turbulence, patches, different sizes.</li>
+            <li>Extras for each weather: lightning and splashes for rain, near flakes for snow, glow for embers…</li>
+          </ul>
+        </div>
+        <figure class="clip" data-src="/guide/media/weather.mp4">
+          <figcaption>Add an effect and tune it live</figcaption>
+        </figure>
+      </div>
+      <div class="wrap duo">
+        <figure class="clip" data-src="/guide/media/weather-storm.mp4"><figcaption>Rain, splashes and lightning</figcaption></figure>
+        <figure class="clip" data-src="/guide/media/weather-snow.mp4"><figcaption>Snow, with flakes close to the camera</figcaption></figure>
+      </div>
+    </section>
+
+    <section id="zones" class="chapter">
+      <div class="wrap split">
+        <div class="text">
+          <p class="numeral">III</p>
+          <h2>Paint where it rains</h2>
+          <p class="sub">Dry under the roof, wet in the street. Paint your zones like in an image editor: no shapes to draw and stack.</p>
+          <ul class="runes">
+            <li>Brush, rectangle, circle, polygon and eraser, from the Tempest! tool in Owlbear's toolbar.</li>
+            <li>Name your zones and give each one its own weather, time of day and filters.</li>
+            <li>A <strong>soft edge</strong> blends the fog into the rest of the map.</li>
+            <li>You see the zone tinted while you paint. Players only see the weather.</li>
+          </ul>
+        </div>
+        <figure class="clip" data-src="/guide/media/zones.mp4">
+          <figcaption>Paint the marsh, and the fog stays there</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section id="light" class="chapter reverse amber">
+      <div class="wrap split">
+        <div class="text">
+          <p class="numeral">IV</p>
+          <h2>Night falls, torches light up</h2>
+          <p class="sub">Slide from dawn to night on a sky gradient. Then light the way: lights pierce the darkness around them.</p>
+          <ul class="runes">
+            <li>Dawn, day, dusk and night, each with <strong>its own colour</strong>.</li>
+            <li>Let time <strong>pass by itself</strong>: a whole day in 24 minutes, or in real time.</li>
+            <li>Right-click a token, <em>Add a light</em>: the torch follows it.</li>
+            <li>Torch, lantern, campfire, candle or magic, with a flicker you can tune.</li>
+          </ul>
+        </div>
+        <figure class="clip" data-src="/guide/media/time.mp4">
+          <figcaption>From day to night, in one slide</figcaption>
+        </figure>
+      </div>
+      <div class="wrap duo">
+        <figure class="clip" data-src="/guide/media/lamp-token.mp4"><figcaption>The torch follows the hero through the dark</figcaption></figure>
+        <figure class="clip" data-src="/guide/media/lamp-fixed.mp4"><figcaption>Place a brazier right on the map</figcaption></figure>
+      </div>
+    </section>
+
+    <section id="fluids" class="chapter">
+      <div class="wrap split">
+        <div class="text">
+          <p class="numeral">V</p>
+          <h2>Water that flows, lava that glows</h2>
+          <p class="sub">Trace a river the way it runs: the current follows your stroke, around rocks and down waterfalls.</p>
+          <ul class="runes">
+            <li>River, pool, waterfall, shore, <strong>lava</strong> and heavy smoke.</li>
+            <li>Obstacles split the current. Sources make water spring and smoke spill out.</li>
+            <li><em>Hide</em> passes the flow under a bridge or behind a ledge.</li>
+            <li>At night, lava lights up its surroundings.</li>
+          </ul>
+        </div>
+        <figure class="clip" data-src="/guide/media/fluids.mp4">
+          <figcaption>Trace the river, it starts flowing</figcaption>
+        </figure>
+      </div>
+      <div class="wrap duo">
+        <figure class="clip" data-src="/guide/media/fluids-lava.mp4"><figcaption>Lava that lights the night</figcaption></figure>
+        <figure class="clip" data-src="/guide/media/fluids-hide.mp4"><figcaption>The river passes under the bridge</figcaption></figure>
+      </div>
+    </section>
+
+    <section id="effects" class="chapter reverse">
+      <div class="wrap split">
+        <div class="text">
+          <p class="numeral">VI</p>
+          <h2>Filters, flashes and quakes</h2>
+          <p class="sub">Turn a scene into a memory, then shake the table: one-shot effects play for every player at once.</p>
+          <ul class="runes">
+            <li>Sepia, black and white, vignette, grain, blur, brightness, contrast, saturation and hue.</li>
+            <li><strong>Lightning</strong> flashes the whole scene, a <strong>gust</strong> sweeps it, a <strong>quake</strong> shakes the map.</li>
+            <li>Every change rolls in smoothly, over the transition time you choose.</li>
+          </ul>
+        </div>
+        <figure class="clip" data-src="/guide/media/filters.mp4">
+          <figcaption>Sepia and vignette for a flashback</figcaption>
+        </figure>
+      </div>
+      <div class="wrap duo">
+        <figure class="clip" data-src="/guide/media/bursts.mp4"><figcaption>Lightning, gust and quake, seen by everyone</figcaption></figure>
+        <figure class="clip" data-src="/guide/media/transition.mp4"><figcaption>The storm rolls in, smoothly</figcaption></figure>
+      </div>
+    </section>
+
+    <section id="style" class="band">
+      <div class="wrap">
+        <header class="chapter-head center">
+          <p class="numeral">VII</p>
+          <h2>Realistic or cartoon</h2>
+          <p class="sub">Drawn maps deserve drawn weather. The cartoon style uses flat colours, crisp edges and ink lines, for every weather and every fluid.</p>
+        </header>
+        <figure class="compare" data-on="/guide/media/style-cartoon.mp4" data-off="/guide/media/style-realistic.mp4" data-fallback="/guide/media/placeholder-map.jpg" data-fake="toon">
+          <div class="compare-stage">
+            <div class="layer off"></div>
+            <div class="layer on"></div>
+            <span class="tag off"><small>Style</small>Realistic</span>
+            <span class="tag on"><small>Style</small>Cartoon</span>
+            <div class="handle" role="slider" tabindex="0" aria-label="Compare cartoon and realistic styles" aria-valuemin="0" aria-valuemax="100" aria-valuenow="50">
+              <span class="grip"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l-6 6 6 6M15 6l6 6-6 6" /></svg></span>
+            </div>
+          </div>
+        </figure>
+      </div>
+    </section>
+
+    <section id="install" class="band install">
+      <div class="wrap center">
+        <p class="kicker">Ready in a minute</p>
+        <h2>Bring the storm to your table</h2>
+        <ol class="ritual">
+          <li><span>1</span><strong>Install the extension</strong><p>From the Owlbear Rodeo store, or with its address just below.</p></li>
+          <li><span>2</span><strong>Enable it in your room</strong><p>The GM does it once. Players have nothing to install.</p></li>
+          <li><span>3</span><strong>Pick a mood</strong><p>Open <em>Tempest!</em> in the top-left menu, go to <em>Moods</em> and click one.</p></li>
+        </ol>
+        <div class="install-bar">
+          <a class="button primary" href="#" data-link="store">Owlbear Rodeo store</a>
+          <span class="or">or</span>
+          <button class="manifest copy" type="button" data-copy="https://tempest-owlbear.pages.dev/manifest.json">
+            <small>Custom extension</small>
+            <code>https://tempest-owlbear.pages.dev/manifest.json</code>
+            <b>Copy</b>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <section id="faq" class="chapter">
+      <div class="wrap">
+        <header class="chapter-head center">
+          <p class="kicker">Questions</p>
+          <h2>Before you ask</h2>
+        </header>
+        <div class="faq">
+          <details>
+            <summary>Do players need to install anything?</summary>
+            <p>No. Once the GM enables the extension in the room, everyone sees the weather.</p>
+          </details>
+          <details>
+            <summary>Who controls the weather?</summary>
+            <p>The GM. Players can only turn effects off on their own screen and choose their quality, in the Tempest! menu.</p>
+          </details>
+          <details>
+            <summary>Will it slow down my players?</summary>
+            <p>Each player's computer draws the effects itself. <em>Quality</em> adapts on its own, and each player can lower it. Limits per scene keep zones, effects and lights in check; raise them in <em>Settings</em> if your table can take it.</p>
+          </details>
+          <details>
+            <summary>Do lights and night change what tokens can see?</summary>
+            <p>No. Tempest! is purely visual: it does not replace Owlbear Rodeo's fog of war or dynamic fog.</p>
+          </details>
+          <details>
+            <summary>Where are my own moods saved?</summary>
+            <p>In your browser. You find them in every room you open with it, but not on another computer.</p>
+          </details>
+          <details>
+            <summary>Which languages are available?</summary>
+            <p>English and French. The interface follows your browser's language.</p>
+          </details>
+        </div>
+      </div>
+    </section>
+
+    <section id="support" class="band">
+      <div class="wrap">
+        <div class="support-card">
+          <div>
+            <p class="kicker">Keep the clouds coming</p>
+            <h2>Tempest! is free</h2>
+            <p class="sub">If it made your table shiver, you can help it grow: new weathers, new moods, and time to fix what you report.</p>
+          </div>
+          <div class="actions">
+            <a class="button primary" href="#" data-link="patreon">Support on Patreon</a>
+            <a class="button ghost" href="https://github.com/misterjj/tempest-/issues" target="_blank" rel="noopener">Report a bug</a>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <footer>
+      Tempest! by Jonathan Jorand · Free and open source (MIT) · Not affiliated with Owlbear Rodeo ·
+      <a href="https://github.com/misterjj/tempest-" target="_blank" rel="noopener">GitHub</a>
+    </footer>
+
+    <script type="module" src="/src/guide/guide.ts"></script>
+  </body>
+</html>
