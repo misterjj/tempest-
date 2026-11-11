@@ -281,6 +281,59 @@ function showRing(center: Point | null, lit: boolean) {
   work.catch(() => {});
 }
 
+/** Anneau en pointillés qui suit le pointeur au pinceau : la taille du pinceau, avant de peindre. */
+const BRUSH_RING_ID = `${PLUGIN_ID}/anneau-pinceau`;
+/** Réglages du pinceau gardés sous la main : le pointeur bouge trop vite pour les relire. */
+let brush: { settings: ToolSettings; unit: number; color: string } | undefined;
+let brushRing: { at: number; radius: number; stroke: string } | undefined;
+
+async function refreshBrush() {
+  const [settings, unit] = await Promise.all([toolSettings(), OBR.scene.grid.getDpi()]);
+  brush = { settings, unit, color: await zoneColor(settings) };
+}
+
+function showBrushRing(point: Point) {
+  if (!brush) return;
+  const { settings, unit, color } = brush;
+  const radius = (settings.size * unit) / 2;
+  const erase = erasing(settings, altDown);
+  const stroke = erase ? "#ffffff" : color;
+  const now = performance.now();
+  if (brushRing && now - brushRing.at < 30) return;
+  // Même taille et même couleur : on déplace l'anneau plutôt que de le recréer.
+  if (brushRing && brushRing.radius === radius && brushRing.stroke === stroke) {
+    brushRing.at = now;
+    OBR.scene.local
+      .updateItems([BRUSH_RING_ID], (items) => {
+        for (const item of items) item.position = point;
+      }, true)
+      .catch(() => {});
+    return;
+  }
+  const item = buildShape()
+    .id(BRUSH_RING_ID)
+    .shapeType("CIRCLE")
+    .width(radius * 2)
+    .height(radius * 2)
+    .position(point)
+    .fillOpacity(0)
+    .strokeColor(stroke)
+    .strokeOpacity(0.9)
+    .strokeWidth(Math.max(1.5, unit * 0.03))
+    .strokeDash([unit * 0.1, unit * 0.08])
+    .layer("CONTROL")
+    .locked(true)
+    .disableHit(true)
+    .build();
+  brushRing = { at: now, radius, stroke };
+  OBR.scene.local.deleteItems([BRUSH_RING_ID]).then(() => OBR.scene.local.addItems([item])).catch(() => {});
+}
+
+function hideBrushRing() {
+  brushRing = undefined;
+  OBR.scene.local.deleteItems([BRUSH_RING_ID]).catch(() => {});
+}
+
 function setClosing(value: boolean) {
   if (closing === value) return;
   closing = value;
@@ -472,6 +525,7 @@ const enqueue = (work: () => Promise<void>) => {
 };
 
 function handleMessage(message: ToolMessage) {
+  if (message.type === "settings" || message.type === "selection") refreshBrush().catch(() => {});
   if (palette.handle(message)) return;
   if (message.type === "undo") enqueue(undo);
   else if (message.type === "redo") enqueue(redo);
@@ -537,6 +591,7 @@ export function setupTool() {
     async onClick() {
       const settings = await toolSettings();
       await setToolSettings({ erase: !settings.erase });
+      await refreshBrush();
     },
   });
 
@@ -568,6 +623,16 @@ export function setupTool() {
             },
           }
         : {
+            ...(mode === "brush"
+              ? {
+                  onToolMove(_context: unknown, event: { pointerPosition: Point }) {
+                    showBrushRing(event.pointerPosition);
+                  },
+                  onDeactivate() {
+                    hideBrushRing();
+                  },
+                }
+              : {}),
             onToolDragStart(_context, event) {
               // Alt relâché hors de la carte : on recale l'affichage sur l'état réel.
               setAlt(event.altKey);
@@ -576,7 +641,10 @@ export function setupTool() {
             onToolDragMove(_context, event) {
               // Alt peut changer en plein tracé : l'événement de la souris fait foi.
               setAlt(event.altKey);
-              if (drawing && (drawing.mode === "brush")) addPoint(drawing.points, event.pointerPosition, drawing.radius);
+              if (drawing && (drawing.mode === "brush")) {
+                addPoint(drawing.points, event.pointerPosition, drawing.radius);
+                showBrushRing(event.pointerPosition);
+              }
               updatePreview(event.pointerPosition);
             },
             onToolDragEnd(_context, event) {
@@ -611,6 +679,7 @@ export function setupTool() {
         if (event.key === "Alt") setAlt(false);
       },
       onActivate() {
+        if (mode === "brush") refreshBrush().catch(() => {});
         enqueue(openPalette);
       },
     });
@@ -630,6 +699,7 @@ export function setupTool() {
   OBR.tool.onToolChange((id) => {
     if (id !== TOOL_ID) {
       stopDrawing();
+      hideBrushRing();
       setAlt(false);
       palette.close();
     }
