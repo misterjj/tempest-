@@ -43,12 +43,43 @@ function lavaGlowCode(lavas: Fluid[], unit: number) {
     float d = 1e5;
     ${segments.join("\n    ")}
     float a = (1.0 - smoothstep(-unit * 0.3, unit * (0.5 + 2.5 * lavaGlow${i}), d)) * (0.55 + 0.45 * lavaGlow${i});
+    if (a > 0.001) a *= lavaSeen(p, lavaColor${i}, unit * (0.8 + 2.5 * lavaGlow${i}));
     col += lavaColor${i} * a;
     amount = 1.0 - (1.0 - amount) * (1.0 - a);
   }`;
     })
     .join("\n");
 }
+
+/**
+ * Seule la lave qu'on voit éclaire : une carte posée par-dessus (calque Notes, par exemple) la
+ * cache, et la lave cachée n'éclaire pas la roche peinte au-dessus. On regarde la scène en quelques
+ * points autour de p et on y cherche la couleur de la lave (sa teinte, pas sa luminosité : la roche
+ * brune est peu saturée). La lave d'une couleur grise se reconnaît à sa clarté.
+ */
+const LAVA_SEEN = `
+float lavaHot(vec2 q, vec3 tint) {
+  half4 s = scene.eval((vec3(q, 1.0) * view).xy);
+  if (s.a < 0.01) return 0.0;
+  vec3 c = vec3(s.rgb) / float(s.a);
+  vec3 want = tint - (tint.r + tint.g + tint.b) / 3.0;
+  if (length(want) < 0.05) return smoothstep(0.55, 0.85, dot(c, vec3(0.299, 0.587, 0.114))) * float(s.a);
+  float match = dot(c - (c.r + c.g + c.b) / 3.0, normalize(want));
+  return smoothstep(0.12, 0.3, match) * float(s.a);
+}
+float lavaSeen(vec2 p, vec3 tint, float reach) {
+  float sum = lavaHot(p, tint) * 4.0;
+  float weight = 4.0;
+  for (int i = 0; i < 16; i++) {
+    float k = sqrt((float(i) + 0.5) / 16.0);
+    float ang = float(i) * 2.39996;
+    float w = 1.0 - 0.7 * k;
+    sum += lavaHot(p + vec2(cos(ang), sin(ang)) * k * reach, tint) * w;
+    weight += w;
+  }
+  return clamp(sum / weight * 2.5, 0.0, 1.0);
+}
+`;
 
 /** Effets ponctuels en cours chez ce joueur (voir render/index.ts). */
 export interface Bursts {
@@ -109,7 +140,7 @@ export function wantedPost(
         postHeats,
         postLooks,
         lamps.length,
-        lavas.map((_, i) => `uniform float lavaGlow${i};\nuniform vec3 lavaColor${i};`).join("\n"),
+        lavas.map((_, i) => `uniform float lavaGlow${i};\nuniform vec3 lavaColor${i};`).join("\n") + (lavas.length ? LAVA_SEEN : ""),
         lavaGlowCode(lavas, unit),
         bursts !== null,
       ),
