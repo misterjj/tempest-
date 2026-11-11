@@ -257,15 +257,19 @@ const BODIES: Record<WeatherKind, string> = {
     streak *= 0.45 + 0.55 * smoothstep(0.0, len, fy);
     alpha = max(alpha, streak * (0.4 + 0.3 * depth));
   }
-  // Éclaboussures : des ronds d'impact au sol, qui s'élargissent et s'effacent.
+  // Éclaboussures : des ronds d'impact au sol, qui s'élargissent et s'effacent. Chaque case a son
+  // rythme ; à chaque nouvel impact, on tire à nouveau s'il tombe, où et de quelle taille : les
+  // ronds ne reviennent pas au même endroit.
   if (o_splashes > 0.0) {
     vec2 sg = coord / (size * 0.9);
     vec2 sc = floor(sg);
     float ss = rnd(sc + 91.0);
-    if (ss < dens * o_splashes * 1.2) {
-      float life = fract(clock() * (1.2 + ss) + ss * 7.0);
-      vec2 sf = sg - sc - (0.25 + 0.5 * vec2(fract(ss * 3.1), fract(ss * 5.7)));
-      float r = life * 0.28 * sizeOf(ss);
+    float st = clock() * (1.2 + ss) + ss * 7.0;
+    float sn = rnd(sc + floor(st) * vec2(17.31, 5.73) + 91.0);
+    if (sn < dens * o_splashes * 1.2) {
+      float life = fract(st);
+      vec2 sf = sg - sc - (0.25 + 0.5 * vec2(fract(sn * 3.1), fract(sn * 5.7)));
+      float r = life * 0.28 * sizeOf(sn);
       float ring = (1.0 - smoothstep(0.0, 0.035, abs(length(sf) - r))) * (1.0 - life);
       alpha = max(alpha, ring * 0.7);
     }
