@@ -81,6 +81,24 @@ float lavaSeen(vec2 p, vec3 tint, float reach) {
 }
 `;
 
+/**
+ * Objet que l'après-rendu suit : il lui est attaché, et Owlbear le déplace avec lui, même
+ * pendant un glisser (sinon, la position d'un objet ne change qu'au lâcher). Ses lumières
+ * suivent alors en direct ; `screen` : taille de la vue, que l'effet attaché ne connaît pas.
+ */
+export interface Anchor {
+  item: string;
+  x: number;
+  y: number;
+  screen: { x: number; y: number };
+}
+
+/**
+ * Demi-côté du carré de l'effet attaché, en unités de carte : il doit couvrir toute la vue,
+ * où que soit l'objet.
+ */
+const ANCHOR_HALF = 50000;
+
 /** Effets ponctuels en cours chez ce joueur (voir render/index.ts). */
 export interface Bursts {
   flash: number;
@@ -95,6 +113,7 @@ export function wantedPost(
   lamps: PlacedLamp[] = [],
   fluids: Fluid[] = [],
   bursts: Bursts | null = null,
+  anchor: Anchor | null = null,
 ): WantedEffect[] {
   const lavas = fluids.filter((fluid) => fluid.kind === "lava" && fluid.enabled && fluid.strokes.length);
   const byId = new Map(zones.map((zone) => [zone.id, zone]));
@@ -131,6 +150,8 @@ export function wantedPost(
     };
   });
   const postHeats: PostHeat[] = heats.map((heat, index) => ({ prefix: `h${index}_`, mask: maskOf(heat.zone) }));
+  // Lumières portées par l'objet suivi : placées par rapport au coin de l'effet, elles le suivent.
+  const live = anchor ? lamps.flatMap((lamp, i) => (lamp.item === anchor.item ? [i] : [])) : [];
 
   return [
     {
@@ -143,10 +164,24 @@ export function wantedPost(
         lavas.map((_, i) => `uniform float lavaGlow${i};\nuniform vec3 lavaColor${i};`).join("\n") + (lavas.length ? LAVA_SEEN : ""),
         lavaGlowCode(lavas, unit),
         bursts !== null,
+        anchor !== null,
+        live,
       ),
       layer: "POST_PROCESS",
+      ...(anchor
+        ? {
+            attach: {
+              to: anchor.item,
+              x: anchor.x - ANCHOR_HALF,
+              y: anchor.y - ANCHOR_HALF,
+              width: ANCHOR_HALF * 2,
+              height: ANCHOR_HALF * 2,
+            },
+          }
+        : {}),
       uniforms: [
         { name: "unit", value: unit },
+        ...(anchor ? [{ name: "screenSize", value: anchor.screen }] : []),
         ...(bursts
           ? [
               { name: "flash", value: bursts.flash },
@@ -155,7 +190,12 @@ export function wantedPost(
             ]
           : []),
         ...lamps.flatMap((lamp, i) => [
-          { name: `lamp${i}`, value: { x: lamp.x, y: lamp.y, z: lamp.radius * unit } },
+          {
+            name: `lamp${i}`,
+            value: live.includes(i)
+              ? { x: ANCHOR_HALF, y: ANCHOR_HALF, z: lamp.radius * unit }
+              : { x: lamp.x, y: lamp.y, z: lamp.radius * unit },
+          },
           { name: `lampPower${i}`, value: lamp.intensity },
           { name: `lampColor${i}`, value: rgb(lamp.color) },
           { name: `lampFlicker${i}`, value: lamp.flicker },

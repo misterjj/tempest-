@@ -107,3 +107,21 @@ describe("filtre flou", () => {
     expect(postSksl("", [], look(["sepia"]))).toContain("0.0, 1.0), l0_f_sepia);");
   });
 });
+
+describe("après-rendu attaché à un porteur de lumière", () => {
+  const look = [{ prefix: "l0_", mask: "float l0_mask(vec2 p) { return 1.0; }", time: true, filters: ["vignette" as const] }];
+  it("reste un effet d'écran sans porteur", () => {
+    const sksl = postSksl("", [], look, 2);
+    expect(sksl).toContain("half4 main(float2 coord)");
+    expect(sksl).not.toContain("uniform vec2 position;");
+    expect(sksl).toContain("vec2 d = p - lamp1.xy;");
+  });
+  it("place la carte et les lumières portées par rapport à la position de l'effet", () => {
+    const sksl = postSksl("", [], look, 2, "", "", false, true, [1]);
+    expect(sksl).toContain("half4 main(float2 local)");
+    expect(sksl).toContain("vec2 coord = position + local;");
+    expect(sksl).toContain("vec2 viewSize = screenSize;");
+    expect(sksl).toContain("vec2 d = p - lamp0.xy;");
+    expect(sksl).toContain("vec2 d = p - (position + lamp1.xy);");
+  });
+});

@@ -14,7 +14,7 @@ import { FLUIDS_KEY, parseFluids, type FluidsData } from "../fluids";
 import { FLUID_CHANNEL, FLUID_TOOL_ID, fluidToolSettings, type FluidToolMessage } from "../tool/fluid-tool";
 import { wantedArrows, wantedFluids } from "./fluid";
 import { wantedOverlay } from "./overlay";
-import { wantedPost } from "./post";
+import { wantedPost, type Anchor } from "./post";
 import { EffectSet } from "./sync";
 import { wantedWeather } from "./weather";
 
@@ -27,6 +27,18 @@ const arrows = new EffectSet();
 let fluids: FluidsData | undefined;
 /** Position des objets qui portent une lumière : les lumières les suivent. */
 let carriers = new Map<string, { x: number; y: number }>();
+/** Objets sélectionnés par ce joueur : on suit en direct la lumière qu'il s'apprête à déplacer. */
+let selection: string[] = [];
+/** Porteur de lumière suivi par l'après-rendu (voir Anchor dans post.ts). */
+let anchorId: string | null = null;
+
+/** Le porteur sélectionné ; sinon celui déjà suivi, s'il porte encore une lumière ; sinon le premier. */
+function pickAnchor(carried: string[]) {
+  const selected = selection.find((id) => carried.includes(id));
+  if (selected) anchorId = selected;
+  else if (!anchorId || !carried.includes(anchorId)) anchorId = carried[0] ?? null;
+  return anchorId;
+}
 /** Outil Fluides actif chez le MJ, et coulée choisie : les chevrons du courant les suivent. */
 let tracing = false;
 let selectedFluid: string | null = null;
@@ -135,8 +147,23 @@ async function apply() {
       })
     : [];
   const idle = { flash: 0, shake: { x: 0, y: 0 } };
+  const anchorItem = pickAnchor([...new Set(lamps.flatMap((lamp) => (lamp.item ? [lamp.item] : [])))]);
+  const anchorAt = anchorItem ? carriers.get(anchorItem) : undefined;
+  const anchor: Anchor | null =
+    anchorItem && anchorAt
+      ? { item: anchorItem, ...anchorAt, screen: { x: await OBR.viewport.getWidth(), y: await OBR.viewport.getHeight() } }
+      : null;
   await looks.sync(
-    wantedPost(frame, zoneList, currentQuality(), unit, lamps, on && !state!.paused ? fluids?.fluids ?? [] : [], isMuted() ? idle : { flash: burst.flash, shake: burst.shake }),
+    wantedPost(
+      frame,
+      zoneList,
+      currentQuality(),
+      unit,
+      lamps,
+      on && !state!.paused ? fluids?.fluids ?? [] : [],
+      isMuted() ? idle : { flash: burst.flash, shake: burst.shake },
+      anchor,
+    ),
   );
   await overlay.sync(isGM ? wantedOverlay(zoneList, selectedZone, painting, unit) : []);
   const fluidList = fluids?.fluids ?? [];
@@ -201,6 +228,14 @@ export async function startRenderer() {
     render();
   };
   OBR.scene.onReadyChange(() => load().catch(console.error));
+  // Un porteur de lumière sélectionné devient celui que l'après-rendu suit, avant qu'on le déplace.
+  selection = (await OBR.player.getSelection()) ?? [];
+  OBR.player.onChange((player) => {
+    const next = player.selection ?? [];
+    if (next.join() === selection.join()) return;
+    selection = next;
+    if (next.some((id) => carriers.has(id) && id !== anchorId)) render();
+  });
   OBR.scene.items.onChange((items) => {
     if (trackCarriers(items)) render();
   });

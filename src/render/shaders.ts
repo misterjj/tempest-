@@ -703,7 +703,7 @@ const FILTER_CODE: Record<FilterKind, string> = {
     rgb = rgb * cos(turn) + cross(k, rgb) * sin(turn) + k * dot(k, rgb) * (1.0 - cos(turn));
   }`,
   vignette: `{
-    vec2 uv = screen / size - 0.5;
+    vec2 uv = screen / viewSize - 0.5;
     rgb *= 1.0 - smoothstep(0.3, 0.85, length(uv) * 1.4) * f_vignette;
   }`,
   grain: `{
@@ -830,7 +830,7 @@ vec2 heatOffset(vec2 coord, float angle, float speed, float density, float drops
  * coulées de lave : `glowUniforms` (déclarations) et `glow` (code qui ajoute à col et amount).
  * Elles ne retirent que la nuit (l'heure du jour) : les filtres restent.
  */
-function lightCode(lamps: number, glowUniforms: string, glow: string) {
+function lightCode(lamps: number, glowUniforms: string, glow: string, live: number[] = []) {
   if (!lamps && !glow) return "";
   return `
 ${Array.from({ length: lamps }, (_, i) => `uniform vec3 lamp${i};\nuniform float lampPower${i};\nuniform vec3 lampColor${i};\nuniform float lampFlicker${i};`).join("\n")}
@@ -842,7 +842,7 @@ vec4 lightAt(vec2 p) {
 ${Array.from(
   { length: lamps },
   (_, i) => `  {
-    vec2 d = p - lamp${i}.xy;
+    vec2 d = p - ${live.includes(i) ? `(position + lamp${i}.xy)` : `lamp${i}.xy`};
     float dist = length(d);
     if (dist < lamp${i}.z) {
       // Comme aux règles : lumière vive jusqu'à mi-rayon, puis pénombre jusqu'au bord.
@@ -874,7 +874,23 @@ const f = (value: number) => {
  * et shakeX, shakeY (décalage de la carte, en unités de carte, pour une secousse). Deux nombres
  * plutôt qu'un vec2 : tous nos réglages sont des nombres ou des vec3, les seuls types sûrs.
  */
-export function postSksl(zoneMasks: string, heats: PostHeat[], looks: PostLook[], lamps = 0, glowUniforms = "", glow = "", bursts = false) {
+/**
+ * `anchored` : l'effet est attaché à un objet (STANDALONE, voir post.ts), et Owlbear le déplace
+ * avec lui, même pendant un glisser. `coord` est alors local : la position sur la carte est
+ * `position + coord`, et la taille de l'écran vient du réglage screenSize. Les lumières `live`
+ * sont portées par cet objet : leur réglage lamp<i> est relatif à `position`, elles le suivent.
+ */
+export function postSksl(
+  zoneMasks: string,
+  heats: PostHeat[],
+  looks: PostLook[],
+  lamps = 0,
+  glowUniforms = "",
+  glow = "",
+  bursts = false,
+  anchored = false,
+  live: number[] = [],
+) {
   const lit = lamps > 0 || glow !== "";
   const heatUniforms = heats.flatMap((heat) => HEAT_UNIFORMS.map((name) => `uniform float ${heat.prefix}${name};`));
   const lookUniforms = looks.flatMap((look) => [
@@ -939,9 +955,17 @@ ${zoneMasks}
 ${looks.map((look) => look.mask).join("\n")}
 ${heats.length ? HEAT_OFFSET : ""}
 ${looks.some((look) => look.filters.includes("glitch")) ? GLITCH_AT : ""}
-${lightCode(lamps, glowUniforms, glow)}
+${anchored ? "uniform vec2 position;\nuniform vec2 screenSize;" : ""}
+${lightCode(lamps, glowUniforms, glow, anchored ? live : [])}
 ${bursts ? "uniform float flash;\nuniform float shakeX;\nuniform float shakeY;" : ""}
-half4 main(float2 coord) {
+${
+  anchored
+    ? `half4 main(float2 local) {
+  vec2 coord = position + local;
+  vec2 viewSize = screenSize;`
+    : `half4 main(float2 coord) {
+  vec2 viewSize = size;`
+}
   vec2 at = coord${bursts ? " + vec2(shakeX, shakeY)" : ""};${heatCode.join("")}
   vec2 screen = (vec3(at, 1.0) * view).xy;${lit ? "\n  vec4 light = lightAt(coord);" : ""}
   half4 base = scene.eval(screen);
