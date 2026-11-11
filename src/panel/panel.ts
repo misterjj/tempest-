@@ -222,7 +222,7 @@ function resetZone(all = false) {
   render();
 }
 
-function effectCard(effect: WeatherEffect) {
+function effectCard(effect: WeatherEffect, full: boolean) {
   const unfolded = open.has(effect.id);
   const head = `
     <div class="card-head">
@@ -231,6 +231,7 @@ function effectCard(effect: WeatherEffect) {
         <span class="summary">${percent(effect.intensity)}</span>
       </button>
       <button type="button" class="icon-button" data-toggle="${effect.id}" aria-pressed="${!effect.enabled}" title="${t(effect.enabled ? "weather.hide" : "weather.show")}">${icon(effect.enabled ? "eye" : "eyeOff")}</button>
+      <button type="button" class="icon-button" data-duplicate="${effect.id}" title="${t(full ? "weather.duplicateFull" : "weather.duplicate")}" ${full ? "disabled" : ""}>${icon("copy")}</button>
       <button type="button" class="icon-button danger" data-delete="${effect.id}" title="${t("weather.delete")}">${icon("trash")}</button>
     </div>`;
   if (!unfolded) return `<div class="card ${effect.enabled ? "" : "off"}">${head}</div>`;
@@ -287,7 +288,7 @@ function weatherTab() {
   const full = effects.length >= limits.effects;
   return `
     ${zonePicker()}
-    ${effects.length ? `<div class="cards">${effects.map(effectCard).join("")}</div>` : `<p class="soon">${t("weather.empty")}</p>`}
+    ${effects.length ? `<div class="cards">${effects.map((effect) => effectCard(effect, full)).join("")}</div>` : `<p class="soon">${t("weather.empty")}</p>`}
     <p class="label add-label">${t("weather.add")}</p>
     <div class="add-row">
       ${WEATHER_KINDS.map((kind) => `<button type="button" class="stop with-icon" data-add="${kind}" title="${t(`weather.${kind}Help`)}" ${full ? "disabled" : ""}>${weatherIcon(kind)}${t(`weather.${kind}`)}</button>`).join("")}
@@ -960,6 +961,14 @@ function wireGM() {
       const effect = defaultEffect(data.add as WeatherKind, zoneId);
       open.add(effect.id);
       change((draft) => draft.weather.push(effect), true, true);
+    } else if (data.duplicate) {
+      // La copie se place juste sous l'original, dépliée pour être réglée aussitôt.
+      const original = effectById(data.duplicate)!;
+      const copy = { ...structuredClone(original), id: crypto.randomUUID() };
+      if (state.weather.filter((effect) => effect.zone === copy.zone).length < limits.effects) {
+        open.add(copy.id);
+        change((draft) => draft.weather.splice(draft.weather.findIndex((effect) => effect.id === original.id) + 1, 0, copy), true, true);
+      }
     } else if (data.fold) {
       if (open.has(data.fold)) open.delete(data.fold);
       else open.add(data.fold);
