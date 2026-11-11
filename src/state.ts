@@ -99,7 +99,7 @@ export interface TimeOfDay {
   colors: Record<TimeKey, string>;
 }
 
-export const FILTER_KINDS = ["blur", "grayscale", "sepia", "vignette", "grain", "brightness", "contrast", "saturation", "hue"] as const;
+export const FILTER_KINDS = ["blur", "grayscale", "sepia", "vignette", "grain", "glitch", "brightness", "contrast", "saturation", "hue"] as const;
 export type FilterKind = (typeof FILTER_KINDS)[number];
 
 export interface Filter {
@@ -391,6 +391,7 @@ export const NEUTRAL_FILTERS: Record<FilterKind, number> = {
   sepia: 0,
   vignette: 0,
   grain: 0,
+  glitch: 0,
   brightness: 0.5,
   contrast: 0.5,
   saturation: 0.5,

@@ -705,7 +705,65 @@ const FILTER_CODE: Record<FilterKind, string> = {
   grain: `{
     rgb += (rnd(floor(screen) + floor(clock() * 24.0)) - 0.5) * 0.25 * f_grain;
   }`,
+  // Le décalage des bandes et des couleurs relit la scène : il est fait à la lecture, voir
+  // `postSksl`. Ici, les lignes de balayage.
+  glitch: "rgb *= 1.0 - 0.12 * f_glitch * step(0.5, fract(screen.y / 3.0));",
 };
+
+/** Avec le glitch, chaque point du flou est lu trois fois : moins de points, pour tenir la cadence. */
+const BLUR_TAPS_GLITCH = 10;
+
+/**
+ * Glitch : par saccades, des bandes horizontales de l'écran glissent de côté et le rouge et le
+ * bleu se séparent. Plus le réglage est fort, plus c'est fréquent, large et décalé. En pixels
+ * d'écran : l'effet garde la même taille quel que soit le zoom. Déclare gShift et gSplit.
+ */
+const glitchOffsets = (amount: string) => `
+      // Glitch : douze tirages par seconde ; de 12 % à 62 % d'entre eux se dérèglent selon le réglage.
+      float gTick = floor(clock() * 12.0);
+      float gOn = step(rnd(vec2(gTick, 3.1)), 0.12 + 0.5 * ${amount});
+      float gBand = floor(screen.y / mix(8.0, 48.0, rnd(vec2(gTick, 7.7))));
+      float gMoved = step(0.65 - 0.35 * ${amount}, rnd(vec2(gBand, gTick)));
+      float gShift = (rnd(vec2(gBand + 0.5, gTick)) - 0.5) * 80.0 * ${amount} * gOn * gMoved;
+      float gSplit = (1.5 + 6.0 * ${amount}) * (0.35 + 0.65 * gOn);`;
+
+/** Lecture glitchée en `at` (position à l'écran) : rouge à droite, bleu à gauche, la bande décalée. */
+const glitchSample = (at: string) =>
+  `glitchAt(${at} + vec2(gShift, 0.0), gSplit)`;
+
+const GLITCH_AT = `
+half4 glitchAt(vec2 at, float split) {
+  half4 r = scene.eval(at + vec2(split, 0.0));
+  half4 g = scene.eval(at);
+  half4 b = scene.eval(at - vec2(split, 0.0));
+  return half4(r.r, g.g, b.b, max(g.a, max(r.a, b.a)));
+}`;
+
+/**
+ * Lecture de la scène pour une ambiance, dans `src` : le flou (un disque de points en spirale,
+ * angle d'or) et le glitch (chaque point lu décalé, voir glitchOffsets). Avec les deux, les trois
+ * couleurs sont floues et décalées ensemble.
+ */
+function readCode(filters: FilterKind[], u: (name: string) => string) {
+  const blur = filters.includes("blur");
+  const glitch = filters.includes("glitch");
+  if (!blur && !glitch) return "";
+  const read = (at: string) => (glitch ? glitchSample(at) : `scene.eval(${at})`);
+  const offsets = glitch ? glitchOffsets(u("f_glitch")) : "";
+  if (!blur) return `${offsets}
+      src = ${read("screen")};`;
+  const taps = glitch ? BLUR_TAPS_GLITCH : BLUR_TAPS;
+  return `${offsets}
+      // Flou : rayon jusqu'à ${BLUR_MAX_PX} px à l'écran.
+      float radius = ${u("f_blur")} * ${BLUR_MAX_PX.toFixed(1)};
+      half4 sum = ${glitch ? read("screen") : "base"};
+      for (int i = 0; i < ${taps}; i++) {
+        float a = float(i) * 2.39996;
+        float d = sqrt((float(i) + 0.5) / ${taps.toFixed(1)}) * radius;
+        sum += ${read("screen + vec2(cos(a), sin(a)) * d")};
+      }
+      src = sum / ${(taps + 1).toFixed(1)};`;
+}
 
 /** Brume de chaleur dans l'après-rendu : ses réglages, sous le préfixe `h<n>_`. */
 export interface PostHeat {
@@ -837,20 +895,7 @@ export function postSksl(zoneMasks: string, heats: PostHeat[], looks: PostLook[]
   {
     float m${index} = ${u("mask")}(coord);
     if (m${index} > 0.001) {
-      half4 src = c;${
-        look.filters.includes("blur")
-          ? `
-      // Flou : disque de points en spirale (angle d'or), rayon jusqu'à ${BLUR_MAX_PX} px à l'écran.
-      float radius = ${u("f_blur")} * ${BLUR_MAX_PX.toFixed(1)};
-      half4 sum = base;
-      for (int i = 0; i < ${BLUR_TAPS}; i++) {
-        float a = float(i) * 2.39996;
-        float d = sqrt((float(i) + 0.5) / ${BLUR_TAPS.toFixed(1)}) * radius;
-        sum += scene.eval(screen + vec2(cos(a), sin(a)) * d);
-      }
-      src = sum / ${(BLUR_TAPS + 1).toFixed(1)};`
-          : ""
-      }
+      half4 src = c;${readCode(look.filters, u)}
       if (src.a > 0.0) {
         // Couleurs sans l'opacité, pour l'étalonnage.
         vec3 rgb = vec3(src.rgb) / float(src.a);${
@@ -889,6 +934,7 @@ ${MASK_HELPERS}
 ${zoneMasks}
 ${looks.map((look) => look.mask).join("\n")}
 ${heats.length ? HEAT_OFFSET : ""}
+${looks.some((look) => look.filters.includes("glitch")) ? GLITCH_AT : ""}
 ${lightCode(lamps, glowUniforms, glow)}
 ${bursts ? "uniform float flash;\nuniform float shakeX;\nuniform float shakeY;" : ""}
 half4 main(float2 coord) {
