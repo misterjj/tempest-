@@ -10,6 +10,9 @@
   color-scheme: light;
 }
 * { box-sizing: border-box; }
+/* Sous Windows, la liste d'un menu déroulant reprend le fond du menu : semi-transparent, il
+   devient blanc et le texte clair disparaît. Les options ont donc un fond plein. */
+select option { background: var(--bg); color: var(--text); }
 html, body { margin: 0; height: 100%; }
 body { font: 13px/1.4 system-ui, -apple-system, sans-serif; color: var(--text); background: var(--bg); }
 [hidden] { display: none !important; }
