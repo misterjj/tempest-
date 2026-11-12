@@ -44,7 +44,7 @@ expected name (and the comparisons show `placeholder-map.jpg` with fake rain).
 | `zones.mp4` | Painted zones |
 | `time.mp4`, `lamp-token.mp4`, `lamp-fixed.mp4` | Time of day and lights |
 | `fluids.mp4`, `fluids-lava.mp4`, `fluids-hide.mp4` | Fluids |
-| `filters.mp4`, `bursts.mp4`, `transition.mp4` | Filters and one-shot effects |
+| `filters.mp4`, `bursts.mp4`, `filter-zone.mp4` | Filters, one-shot effects, a filter on a painted zone |
 | `style-cartoon.mp4`, `style-realistic.mp4` | Realistic / cartoon comparison |
 
 For a comparison, keep the camera still and record both versions with the same length: they are played in sync.

@@ -143,6 +143,10 @@ h1 { font-size: clamp(3rem, 5.4vw, 6rem); line-height: 1.02; text-shadow: 0 4px 
   color: transparent;
   filter: drop-shadow(0 0 26px rgb(79 163 224 / 0.7));
   font-style: italic;
+  /* L'italique déborde de sa boîte : sans cette marge, le fond découpé coupe la dernière lettre de chaque ligne. */
+  padding-right: 0.12em;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
 }
 .lead { max-width: 34rem; margin: 1.6rem 0 0; color: #d3dde9; font-size: 1.2rem; }
 .hint { margin-top: 2.2rem; color: var(--muted); font-size: 0.9rem; }
@@ -254,6 +258,7 @@ h1 { font-size: clamp(3rem, 5.4vw, 6rem); line-height: 1.02; text-shadow: 0 4px 
 .compare .grip svg { width: 22px; height: 22px; fill: none; stroke: #04111d; stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; }
 .compare .handle:focus-visible .grip, .compare.dragging .grip { transform: translate(-50%, -50%) scale(1.12); }
 .compare figcaption { margin-top: 0.9rem; color: var(--muted); font-size: 0.9rem; }
+#style .compare figcaption { text-align: center; max-width: 60ch; margin-inline: auto; }
 /* Sans vidéo, la carte provisoire imite la météo : teinte de nuit et pluie en CSS. */
 .compare .layer.fake > img { filter: brightness(0.5) saturate(0.45) contrast(1.15); }
 .compare .layer.fake::after {
@@ -530,6 +535,7 @@ details p { margin: 0.8rem 0 0; color: var(--muted); }
 
 footer { position: relative; z-index: 1; padding: 3rem 5vw; text-align: center; color: var(--muted); font-size: 0.85rem; border-top: 1px solid var(--line); }
 footer a { color: var(--muted); }
+footer .privacy { max-width: 40rem; margin: 0.8rem auto 0; font-size: 0.78rem; opacity: 0.75; }
 
 /* Apparition au défilement */
 .reveal { opacity: 0; transform: translateY(28px); transition: opacity 0.9s ease, transform 0.9s ease; }

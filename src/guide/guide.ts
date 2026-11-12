@@ -5,7 +5,7 @@ import "@fontsource-variable/inter";
 /** Liens à renseigner. Vide : le bouton reste visible et signale qu'il arrive bientôt. */
 const LINKS: Record<string, string> = {
   store: "",
-  patreon: "",
+  patreon: "https://www.patreon.com/misterjj_obr",
 };
 
 /** La page est en anglais, ou en français sous /fr/. */
