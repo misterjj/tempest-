@@ -66,12 +66,14 @@ import { BURST_CHANNEL, BURST_KINDS, PANEL_CHANNEL, type BurstKind, type BurstMe
 import { TOOL_ID, setToolSettings } from "../tool/tool";
 import type { Zone } from "../zones";
 import { icon, weatherIcon } from "./icons";
+import { watchSteppers } from "./stepper";
 import "./panel.css";
 
 const TABS = ["presets", "weather", "time", "filters", "fluids", "settings"] as const;
 type Tab = (typeof TABS)[number];
 
 const app = document.querySelector<HTMLDivElement>("#app")!;
+watchSteppers(app);
 const escape = (text: string) => text.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
 
 let tab: Tab = "presets";
@@ -770,6 +772,23 @@ function languageSection() {
     </section>`;
 }
 
+/** Le site guide, dans la langue de l'interface. */
+const GUIDE_URL = "https://tempest-owlbear.pages.dev/";
+const PATREON_URL = "https://www.patreon.com/misterjj_obr";
+
+/** Soutien, guide et confidentialité, pour le MJ comme pour les joueurs. */
+function aboutSection() {
+  const guide = currentLanguage() === "fr" ? `${GUIDE_URL}fr/` : GUIDE_URL;
+  return `
+    <section class="settings about">
+      <p class="label">${t("settings.about")}</p>
+      <p class="hint flush">${t("settings.support")}</p>
+      <p><a class="patreon" href="${PATREON_URL}" target="_blank" rel="noopener">${t("settings.patreon")}</a></p>
+      <p class="hint flush"><a href="${guide}" target="_blank" rel="noopener">${t("settings.guide")}</a></p>
+      <p class="hint flush">${t("settings.privacy")}</p>
+    </section>`;
+}
+
 function settingsTab() {
   const quality = qualitySetting();
   const raised = raisedLimits(limits);
@@ -804,7 +823,8 @@ function settingsTab() {
       </div>
       <p class="hint flush">${t("settings.displayHelp")}</p>
     </section>
-    ${languageSection()}`;
+    ${languageSection()}
+    ${aboutSection()}`;
 }
 
 let render = renderGM;
@@ -1109,6 +1129,7 @@ function renderPlayer() {
           .join("")}
       </div>
       ${languageSection()}
+      ${aboutSection()}
     </main>`;
   app.querySelector<HTMLInputElement>("#mute")!.onchange = (event) => setMuted((event.target as HTMLInputElement).checked);
   app.querySelectorAll<HTMLButtonElement>("[data-quality]").forEach((button) => {

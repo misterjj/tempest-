@@ -36,10 +36,14 @@ button { font: inherit; color: inherit; }
 .soon, .hint { margin: 0; color: var(--muted); }
 .hint { margin: 4px 0 14px 24px; font-size: 12px; }
 .label { margin: 0 0 6px; color: var(--muted); font-size: 12px; }
+/* Titres de section en petites majuscules, comme dans Spellcast FX. */
+p.label { font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; }
 .switch { display: flex; align-items: center; gap: 8px; cursor: pointer; }
 .segmented { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 2px; padding: 2px; border-radius: 8px; background: var(--surface); }
-.segmented button { border: 0; border-radius: 6px; padding: 5px 4px; background: none; color: var(--muted); cursor: pointer; }
-.segmented button[aria-pressed="true"] { background: var(--surface-hover); color: var(--text); font-weight: 600; }
+.segmented button { border: 2px solid transparent; border-radius: 6px; padding: 5px 4px; background: none; color: var(--muted); cursor: pointer; }
+.segmented button:hover { color: var(--text); }
+/* Choix marqué d'une bordure et d'une teinte d'accent, comme dans Spellcast FX. */
+.segmented button[aria-pressed="true"] { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 22%, transparent); color: var(--text); font-weight: 600; }
 button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
 /* --- Onglets Météo, Heure, Filtres ----------------------------------------------------- */
@@ -164,9 +168,40 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
 
 /* --- Réglages -------------------------------------------------------------------------- */
 .settings { display: flex; flex-direction: column; gap: 8px; }
+.settings > .label { margin: 0; }
+.about p { margin: 0; }
+.about a { color: var(--accent); }
+.about a.patreon {
+  display: inline-block; padding: 6px 12px; border-radius: 8px;
+  background: #ff424d; color: #fff; font-weight: 600; text-decoration: none;
+}
+.about a.patreon:hover { background: #ff5a63; }
 .limit { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .limit input {
-  width: 76px; padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--text); font: inherit; text-align: right;
+  box-sizing: border-box; height: 28px; padding: 2px 6px; border: 1px solid var(--line); border-radius: 6px;
+  background: var(--surface); color: var(--text); font: inherit; font-size: 12px; user-select: text;
+}
+
+/* Des boutons − et + à la place des petites flèches du navigateur, plus faciles à viser, surtout au doigt. */
+input[type="number"] { appearance: textfield; }
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button { appearance: none; margin: 0; }
+.stepper { display: flex; align-items: stretch; flex: none; width: 112px; min-width: 0; }
+.stepper input[type="number"] {
+  flex: 1; width: 100%; min-width: 24px; margin: 0; padding: 2px; border-radius: 0; border-inline: 0; text-align: center;
+}
+.stepper .step {
+  all: unset; box-sizing: border-box; flex: none; display: grid; place-items: center; width: 26px; min-height: 28px;
+  background: var(--surface-hover); color: var(--text); font-size: 14px; font-weight: 600; cursor: pointer; touch-action: manipulation;
+}
+.stepper .step:first-child { border-radius: 6px 0 0 6px; }
+.stepper .step:last-child { border-radius: 0 6px 6px 0; }
+.stepper .step:hover { background: color-mix(in srgb, var(--text) 22%, transparent); }
+.stepper .step:active { background: color-mix(in srgb, var(--accent) 45%, transparent); }
+@media (pointer: coarse) {
+  .stepper { width: 136px; }
+  .stepper .step { width: 36px; min-height: 36px; font-size: 18px; }
+  .stepper input[type="number"] { height: auto; }
 }
 .warning { margin: 0; padding: 6px 8px; border-radius: 6px; background: rgb(255 180 60 / 0.14); color: #ffcf7a; font-size: 12px; }
 :root[data-theme="light"] .warning { color: #8a5600; }
