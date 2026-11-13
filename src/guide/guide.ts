@@ -11,8 +11,8 @@ const LINKS: Record<string, string> = {
 /** La page est en anglais, ou en français sous /fr/. */
 const lang = document.documentElement.lang === "fr" ? "fr" : "en";
 const TEXT = {
-  en: { soon: "Coming soon", copy: "Click to copy", copied: "Copied ✓", missing: "Video to record:", placeholder: "Placeholder: the video is not recorded yet" },
-  fr: { soon: "Bientôt disponible", copy: "Cliquer pour copier", copied: "Copié ✓", missing: "Vidéo à tourner :", placeholder: "Provisoire : la vidéo n'est pas encore tournée" },
+  en: { soon: "Coming soon", copy: "Click to copy", copied: "Copied ✓", copyFailed: "Copy failed: select the address", missing: "Video to record:", placeholder: "Placeholder: the video is not recorded yet" },
+  fr: { soon: "Bientôt disponible", copy: "Cliquer pour copier", copied: "Copié ✓", copyFailed: "Échec : sélectionne l'adresse", missing: "Vidéo à tourner :", placeholder: "Provisoire : la vidéo n'est pas encore tournée" },
 }[lang];
 
 const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -218,7 +218,8 @@ async function loadMedia(src: string): Promise<HTMLVideoElement | HTMLImageEleme
 
 function setupCompare(fig: HTMLElement) {
   const stage = fig.querySelector<HTMLElement>(".compare-stage")!;
-  const handle = fig.querySelector<HTMLElement>(".handle")!;
+  // Un vrai <input type="range">, invisible, par-dessus l'image : la poignée dessinée suit sa valeur.
+  const range = fig.querySelector<HTMLInputElement>(".range")!;
   const onLayer = fig.querySelector<HTMLElement>(".layer.on")!;
   const offLayer = fig.querySelector<HTMLElement>(".layer.off")!;
   let pos = 50;
@@ -227,28 +228,34 @@ function setupCompare(fig: HTMLElement) {
   const set = (value: number) => {
     pos = Math.min(100, Math.max(0, value));
     fig.style.setProperty("--pos", `${pos}%`);
-    handle.setAttribute("aria-valuenow", String(Math.round(pos)));
+    range.value = String(pos);
+    range.setAttribute("aria-valuetext", `${Math.round(pos)}%`);
     // OFF à gauche, ON à droite : une étiquette s'efface quand la poignée passe dessus.
     fig.dataset.near = pos < 22 ? "off" : pos > 78 ? "on" : "";
   };
   set(50);
+  range.addEventListener("input", () => {
+    touched = true;
+    set(range.valueAsNumber);
+  });
 
+  // Glisser n'importe où sur l'image : sur iPhone, le curseur natif ne bouge que si on attrape sa poignée.
   const fromPointer = (e: PointerEvent) => {
     const r = stage.getBoundingClientRect();
     set(((e.clientX - r.left) / r.width) * 100);
   };
-  stage.addEventListener("pointerdown", (e) => {
+  range.addEventListener("pointerdown", (e) => {
     touched = true;
     fig.classList.add("dragging");
-    stage.setPointerCapture(e.pointerId);
+    range.setPointerCapture(e.pointerId);
     fromPointer(e);
-    handle.focus({ preventScroll: true });
   });
-  stage.addEventListener("pointermove", (e) => { if (stage.hasPointerCapture(e.pointerId)) fromPointer(e); });
+  range.addEventListener("pointermove", (e) => { if (range.hasPointerCapture(e.pointerId)) fromPointer(e); });
   const release = () => fig.classList.remove("dragging");
-  stage.addEventListener("pointerup", release);
-  stage.addEventListener("pointercancel", release);
-  handle.addEventListener("keydown", (e) => {
+  range.addEventListener("pointerup", release);
+  range.addEventListener("pointercancel", release);
+  // Les flèches avancent de 5 % plutôt que du pas fin du glisser.
+  range.addEventListener("keydown", (e) => {
     const steps: Record<string, number> = { ArrowLeft: -5, ArrowRight: 5, ArrowDown: -5, ArrowUp: 5, PageDown: -20, PageUp: 20 };
     if (e.key in steps) set(pos + steps[e.key]);
     else if (e.key === "Home") set(0);
@@ -372,17 +379,45 @@ for (const fig of document.querySelectorAll<HTMLElement>("figure.clip[data-src]"
 
 // --- En-tête, apparition au défilement ----------------------------------------
 
-const top = document.querySelector(".top")!;
+const top = document.querySelector<HTMLElement>(".top")!;
+const nav = top.querySelector<HTMLElement>("nav")!;
 const menuButton = top.querySelector<HTMLButtonElement>(".menu-toggle")!;
-const setMenu = (open: boolean) => {
-  top.classList.toggle("open", open);
-  menuButton.setAttribute("aria-expanded", String(open));
+const narrow = matchMedia("(max-width: 1100px)");
+const hasPopover = Object.hasOwn(HTMLElement.prototype, "popover");
+
+// Sur petit écran, le menu est un popover : le bouton l'ouvre, Échap ou un clic à côté le ferment.
+// Sur grand écran, c'est une barre de liens ordinaire.
+const syncMenu = () => {
+  if (hasPopover && narrow.matches) nav.setAttribute("popover", "auto");
+  else nav.removeAttribute("popover");
+  top.classList.remove("open");
 };
-menuButton.addEventListener("click", () => setMenu(!top.classList.contains("open")));
-for (const link of top.querySelectorAll("nav a")) link.addEventListener("click", () => setMenu(false));
-const onScroll = () => top.classList.toggle("scrolled", scrollY > 40);
-addEventListener("scroll", onScroll, { passive: true });
-onScroll();
+narrow.addEventListener("change", syncMenu);
+syncMenu();
+
+// Navigateurs sans popover : l'ancien menu, ouvert par une classe.
+if (!hasPopover) {
+  menuButton.setAttribute("aria-expanded", "false");
+  menuButton.addEventListener("click", () => {
+    const open = !top.classList.contains("open");
+    top.classList.toggle("open", open);
+    menuButton.setAttribute("aria-expanded", String(open));
+  });
+}
+for (const link of nav.querySelectorAll("a")) {
+  link.addEventListener("click", () => {
+    if (hasPopover && nav.matches(":popover-open")) nav.hidePopover();
+    top.classList.remove("open");
+    menuButton.setAttribute("aria-expanded", "false");
+  });
+}
+
+// L'en-tête se remplit au défilement en CSS ; ce relais ne sert qu'aux navigateurs qui ne savent pas le faire.
+if (!CSS.supports("(animation-timeline: scroll()) and (animation-range: 0% 100%)")) {
+  const onScroll = () => top.classList.toggle("scrolled", scrollY > 40);
+  addEventListener("scroll", onScroll, { passive: true });
+  onScroll();
+}
 
 const reveal = new IntersectionObserver(
   (entries) => {
@@ -412,17 +447,32 @@ for (const a of document.querySelectorAll<HTMLAnchorElement>("a[data-link]")) {
 
 // --- Copie de l'adresse du manifest ----------------------------------------------
 
+// La bulle à côté du bouton (role="status") montre et annonce le résultat, réussi ou non.
+let lastMessage = "";
 for (const button of document.querySelectorAll<HTMLElement>(".copy[data-copy]")) {
-  const label = button.querySelector("b");
-  const idle = label?.textContent ?? "";
+  const tip = button.nextElementSibling as HTMLElement;
+  let timer = 0;
   button.title = TEXT.copy;
   button.addEventListener("click", async () => {
-    await navigator.clipboard.writeText(button.dataset.copy!);
-    button.classList.add("copied");
-    if (label) label.textContent = TEXT.copied;
-    setTimeout(() => {
-      button.classList.remove("copied");
-      if (label) label.textContent = idle;
-    }, 1600);
+    let ok = true;
+    try {
+      await navigator.clipboard.writeText(button.dataset.copy!);
+    } catch {
+      ok = false;
+    }
+    let message = ok ? TEXT.copied : TEXT.copyFailed;
+    // VoiceOver n'annonce pas deux fois de suite le même message : une espace insécable le rend différent.
+    if (message === lastMessage) message += "\u00A0";
+    lastMessage = message;
+    clearTimeout(timer);
+    button.classList.toggle("copied", ok);
+    button.classList.toggle("failed", !ok);
+    tip.classList.toggle("failed", !ok);
+    tip.textContent = "";
+    requestAnimationFrame(() => (tip.textContent = message));
+    timer = window.setTimeout(() => {
+      button.classList.remove("copied", "failed");
+      tip.textContent = "";
+    }, 2000);
   });
 }

@@ -16,14 +16,14 @@
 
     <header class="top">
       <a class="brand" href="#"><img src="/icon.svg" alt="" /> Tempest!</a>
-      <nav>
+      <nav id="site-menu">
         <a href="#compare">Comparatif</a>
         <a href="#moods">Fonctions</a>
         <a href="#install">Installation</a>
         <a href="#faq">FAQ</a>
       </nav>
       <a class="lang" href="/" hreflang="en" lang="en" title="English version">EN</a>
-      <button class="menu-toggle" type="button" aria-expanded="false" aria-label="Menu"><span></span></button>
+      <button class="menu-toggle" type="button" popovertarget="site-menu" aria-controls="site-menu" aria-label="Menu"><span></span></button>
       <a class="button small primary" href="#install">Installer</a>
     </header>
 
@@ -49,7 +49,8 @@
             <div class="layer on"></div>
             <span class="tag off"><small>Tempest!</small>OFF</span>
             <span class="tag on"><small>Tempest!</small>ON</span>
-            <div class="handle" role="slider" tabindex="0" aria-label="Comparer avec et sans Tempest!" aria-valuemin="0" aria-valuemax="100" aria-valuenow="50">
+            <input class="range" type="range" min="0" max="100" step="0.1" value="50" aria-label="Comparer avec et sans Tempest!" aria-valuetext="50%" />
+            <div class="handle" aria-hidden="true">
               <span class="grip"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l-6 6 6 6M15 6l6 6-6 6" /></svg></span>
             </div>
           </div>
@@ -261,7 +262,8 @@
             <div class="layer on"></div>
             <span class="tag off"><small>Style</small>Réaliste</span>
             <span class="tag on"><small>Style</small>Cartoon</span>
-            <div class="handle" role="slider" tabindex="0" aria-label="Comparer les styles cartoon et réaliste" aria-valuemin="0" aria-valuemax="100" aria-valuenow="50">
+            <input class="range" type="range" min="0" max="100" step="0.1" value="50" aria-label="Comparer les styles cartoon et réaliste" aria-valuetext="50%" />
+            <div class="handle" aria-hidden="true">
               <span class="grip"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l-6 6 6 6M15 6l6 6-6 6" /></svg></span>
             </div>
           </div>
@@ -282,11 +284,14 @@
         <div class="install-bar">
           <a class="button primary" href="#" data-link="store">Boutique Owlbear Rodeo</a>
           <span class="or">ou</span>
-          <button class="manifest copy" type="button" data-copy="https://tempest-owlbear.pages.dev/manifest.json">
-            <small>Extension personnalisée</small>
-            <code>https://tempest-owlbear.pages.dev/manifest.json</code>
-            <b>Copier</b>
-          </button>
+          <span class="copy-wrap">
+            <button class="manifest copy" type="button" data-copy="https://tempest-owlbear.pages.dev/manifest.json">
+              <small>Extension personnalisée</small>
+              <code>https://tempest-owlbear.pages.dev/manifest.json</code>
+              <b>Copier</b>
+            </button>
+            <span class="copy-tip" role="status"></span>
+          </span>
         </div>
       </div>
     </section>
